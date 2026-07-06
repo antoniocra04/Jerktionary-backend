@@ -213,9 +213,12 @@ test_import() {
 
 install_dependencies() {
     write_step "upgrading pip"
-    invoke_checked "$PYTHON" -m pip install --quiet --upgrade pip
-    write_step "installing backend dependencies"
-    invoke_checked "$PYTHON" -m pip install --quiet -e ".[dev]"
+    invoke_checked "$PYTHON" -m pip install --upgrade pip
+    write_step "installing backend dependencies (this can take several minutes on first run)"
+    # No --quiet: on macOS faster-whisper/numpy/natasha pull large wheels, and a
+    # silent multi-minute install looks like a hang. pip's own progress is the
+    # clearest signal that something is actually downloading.
+    invoke_checked "$PYTHON" -m pip install -e ".[dev]"
     write_ok "dependencies installed"
 }
 

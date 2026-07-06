@@ -346,22 +346,28 @@ ensure_whisper_model() {
 }
 
 # ── Interactive model picker (mirror of Show-ModelMenu/Select-Models) ─────────
+# macOS ships bash 3.2, which has no `local -n` (nameref, bash 4.3+). So the
+# caller stashes the three parallel arrays into globals _menu_names / _menu_sizes
+# / _menu_notes and we read them by name through eval — portable back to 3.2.
 show_model_menu() {
     local title="$1" current="$2"
-    # nameref into the caller's arrays — _n/_s/_t are the NAMES/SIZES/NOTES arrays.
-    local -n _n=_menu_names _s=_menu_sizes _t=_menu_notes
+
+    # Snapshot the global arrays into locals (bash 3.2-safe array copy).
+    local -a names sizes notes
+    eval 'names=("${_menu_names[@]}")'
+    eval 'sizes=("${_menu_sizes[@]}")'
+    eval 'notes=("${_menu_notes[@]}")'
 
     echo ""
     write_step "$title"
     echo "Доступные модели:"
 
-    local i=1 default_idx=1 in_list=0
+    local i=1 default_idx=1 in_list=0 idx=0
     local current_norm; current_norm="$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')"
-    local idx=0
-    for name in "${_n[@]}"; do
+    for name in "${names[@]}"; do
         local name_norm; name_norm="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
-        printf '  [%d] %-18s %s' "$i" "$name" "${_s[$idx]}"
-        [ -n "${_t[$idx]}" ] && printf '   • %s' "${_t[$idx]}"
+        printf '  [%d] %-18s %s' "$i" "$name" "${sizes[$idx]}"
+        [ -n "${notes[$idx]}" ] && printf '   • %s' "${notes[$idx]}"
         printf '\n'
         if [ "$name_norm" = "$current_norm" ] && [ -n "$current_norm" ]; then
             default_idx=$i; in_list=1
@@ -375,7 +381,7 @@ show_model_menu() {
         printf '  [0] Оставить текущую: %s\n' "$current"
     fi
 
-    local max_choice=${#_n[@]}
+    local max_choice=${#names[@]}
     local default_choice
     if [ "$keep_current" -eq 1 ]; then default_choice=0; else default_choice=$default_idx; fi
 
@@ -386,7 +392,7 @@ show_model_menu() {
             if [ "$keep_current" -eq 1 ] && [ "$default_choice" -eq 0 ]; then
                 printf '%s' "$current"; return
             fi
-            printf '%s' "${_n[$((default_idx-1))]}"; return
+            printf '%s' "${names[$((default_idx-1))]}"; return
         fi
         case "$input" in
             ''|*[!0-9]*) write_warn "Нужно число от 0 до $max_choice"; continue ;;
@@ -395,7 +401,7 @@ show_model_menu() {
             printf '%s' "$current"; return
         fi
         if [ "$input" -ge 1 ] && [ "$input" -le "$max_choice" ]; then
-            printf '%s' "${_n[$((input-1))]}"; return
+            printf '%s' "${names[$((input-1))]}"; return
         fi
         write_warn "Нужно число от 0 до $max_choice"
     done

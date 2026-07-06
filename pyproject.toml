@@ -1,0 +1,63 @@
+[project]
+name = "realtime-terms-backend"
+version = "0.1.0"
+description = "FastAPI backend for realtime Whisper transcription, Natasha term extraction, and Ollama explanations."
+requires-python = ">=3.11"
+dependencies = [
+    "aiosqlite>=0.20.0",
+    "anyio>=4.4.0",
+    "fastapi>=0.115.0",
+    "faster-whisper>=1.0.0",
+    "httpx>=0.27.0",
+    "loguru>=0.7.2",
+    "natasha>=1.6.0",
+    "numpy>=1.26.0",
+    "pydantic>=2.8.0",
+    "pydantic-settings>=2.4.0",
+    "rich>=13.7.0",
+    "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+# CUDA runtime DLLs that faster-whisper/CTranslate2 need on Windows but do not
+# bundle (cuBLAS + cudart). Install with: pip install -e ".[cuda]"
+cuda = [
+    "nvidia-cublas-cu12>=12.9; sys_platform == 'win32'",
+    "nvidia-cuda-runtime-cu12>=12.9; sys_platform == 'win32'",
+]
+dev = [
+    "black>=24.8.0",
+    "mypy>=1.11.0",
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.6.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = []
+warn_unused_ignores = true
+warn_return_any = true
+disallow_untyped_defs = true
+exclude = ["data/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "data*"]

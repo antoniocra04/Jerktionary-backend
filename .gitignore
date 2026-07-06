@@ -1,0 +1,46 @@
+# Secrets / local config — never commit. Ship .env.example instead.
+.env
+.env.local
+.env.*.local
+
+# Agent tooling logs
+.agents/
+
+# Local runtime data (SQLite cache, WAL files)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+build/
+dist/
+
+# Virtual environments
+.venv/
+.venv-backend/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.ruff/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

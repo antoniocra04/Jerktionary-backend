@@ -67,30 +67,78 @@ WHISPER_MODEL_NOTES=("Рекомендуется: баланс скорости 
 
 # ── .env helpers (direct ports of Get-EnvValue/Set-EnvValue/Test-EnvEnabled) ─
 get_env_value() {
-    # echo the value of KEY in $ENV_FILE (quotes/whitespace stripped), or $2 default.
+    # Print the value of KEY from $ENV_FILE (surrounding quotes/spaces stripped),
+    # or $2 default. Pure-bash line scan — no sed/grep, so no GNU-vs-BSD/portable
+    # quoting pain. CR (from a CRLF .env written on Windows) is stripped too.
     local key="$1" default="${2:-}"
     [ -f "$ENV_FILE" ] || { printf '%s' "$default"; return; }
-    local value
-    # Match  ^<optional space>KEY<optional space>=<value>  ; strip surrounding quotes/spaces.
-    value="$(grep -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[^A-Za-z0-9_]/\\&/g')[[:space:]]*=" "$ENV_FILE" 2>/dev/null | head -n1 || true)"
-    [ -z "$value" ] && { printf '%s' "$default"; return; }
-    value="${value#*=}"
-    value="${value%\"}"; value="${value#\"}"
-    value="${value%\'}"; value="${value#\'}"
-    printf '%s' "$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    local line raw value
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        # <optional spaces>KEY<optional spaces>=<rest>
+        case "$line" in
+            *"$key"=*)
+                raw="${line#"${line%%[![:space:]]*}"}"   # ltrim
+                case "$raw" in
+                    "$key"=*) ;;
+                    *"$key"=*)
+                        raw="${raw#*"$key"=}"
+                        raw="${raw%"${raw##*[![:space:]]}"}"
+                        case "$raw" in
+                            "$key"=*) ;;
+                            *) continue ;;
+                        esac
+                        ;;
+                    *) continue ;;
+                esac
+                value="${raw#*=}"
+                value="${value%$'\r'}"
+                value="${value%\"}"; value="${value#\"}"
+                value="${value%\'}"; value="${value#\'}"
+                value="${value%"${value##*[![:space:]]}"}"   # rtrim
+                value="${value#"${value%%[![:space:]]*}"}"   # ltrim
+                printf '%s' "$value"
+                return
+                ;;
+        esac
+    done < "$ENV_FILE"
+    printf '%s' "$default"
 }
 
 set_env_value() {
-    # Set KEY=VALUE in $ENV_FILE: replace existing line or append. No BOM (macOS
-    # Python reads plain utf-8 — the PS version's UTF-8 BOM surfaces as \ufeff).
+    # Set KEY=VALUE in $ENV_FILE: rewrite the file line-by-line, replacing the
+    # existing KEY line or appending a new one. Pure bash — no sed (BSD sed on
+    # macOS chokes on the substitution with CRLF lines), no BOM (macOS Python
+    # reads plain utf-8). Preserves all other lines, comments, and blank lines.
     local key="$1" value="$2"
-    local tmp
+    local tmp found=0 line keyline
     tmp="$(mktemp)"
-    if [ -f "$ENV_FILE" ] && grep -Eq "^[[:space:]]*$(printf '%s' "$key" | sed 's/[^A-Za-z0-9_]/\\&/g')[[:space:]]*=" "$ENV_FILE"; then
-        sed -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[^A-Za-z0-9_]/\\&/g')[[:space:]]*=.*|${key}=${value}|" "$ENV_FILE" > "$tmp"
-    else
-        { [ -f "$ENV_FILE" ] && cat "$ENV_FILE"; echo "${key}=${value}"; } > "$tmp"
+    keyline="${key}=${value}"
+    if [ -f "$ENV_FILE" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            case "$line" in
+                *"$key"=*)
+                    # Is the trimmed prefix exactly KEY= ? (not a substring like
+                    # OLLAMA_MODEL_KEY= matching OLLAMA_MODEL=)
+                    local trimmed="${line#"${line%%[![:space:]]*}"}"
+                    case "$trimmed" in
+                        "$key"=*)
+                            printf '%s\n' "$keyline" >> "$tmp"
+                            found=1
+                            ;;
+                        *)
+                            printf '%s\n' "$line" >> "$tmp"
+                            ;;
+                    esac
+                    ;;
+                *)
+                    printf '%s\n' "$line" >> "$tmp"
+                    ;;
+            esac
+        done < "$ENV_FILE"
     fi
+    [ "$found" -eq 0 ] && printf '%s\n' "$keyline" >> "$tmp"
     mv "$tmp" "$ENV_FILE"
 }
 

@@ -10,6 +10,14 @@ FastAPI backend для desktop-приложения: audio chunks от Electron 
 backend.cmd
 ```
 
+Для macOS / Linux:
+
+```bash
+./backend.sh          # или: bash backend.sh
+```
+
+`backend.sh` — это bash-порт того же процесса запуска (см. ниже).
+
 Она создаст `.venv`, поставит зависимости, создаст `.env` из `.env.example`, создаст `data/`, установит Ollama при отсутствии и запустит backend на `http://127.0.0.1:8000`.
 
 Перед запуском `run` интерактивно спросит LLM-модель (Ollama) и Whisper-модель из кураторского
@@ -40,11 +48,55 @@ Ollama ставится автоматически через `winget`, если
 `-PullLlm` скачивает модель `qwen3:8b` через Ollama. Без этого флага backend всё равно стартует, но LLM будет `disabled`, если модель недоступна.
 `-SkipModelSelect` пропускает интерактивный выбор LLM- и Whisper-модели — используются значения из `.env`.
 
+## macOS / Linux
+
+Запуск через bash-лаунчер (зеркало `backend.cmd`):
+
+```bash
+./backend.sh run
+./backend.sh install
+./backend.sh test
+./backend.sh run -SkipModelSelect
+./backend.sh run -SkipOllamaInstall
+./backend.sh run -Port 8010
+```
+
+Если скрипт не исполняемый: `chmod +x backend.sh scripts/backend.sh`.
+
+**Ollama** не ставится автоматически (на маке/линуксе нет `winget`). Установите вручную:
+
+```bash
+# macOS
+brew install ollama
+# Linux
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Пока Ollama недоступен, backend стартует, но LLM остаётся `disabled` — как с `-SkipOllamaInstall` на Windows.
+
+**Whisper на macOS:** CUDA на маке нет, поэтому лаунчер при первом запуске записывает в `.env`
+`WHISPER_DEVICE=cpu` и `WHISPER_COMPUTE_TYPE=int8` — Whisper работает на CPU через CTranslate2
+(нативного Metal у faster-whisper нет). На Linux с NVIDIA GPU можно вручную поставить
+`WHISPER_DEVICE=cuda` / `WHISPER_COMPUTE_TYPE=float16` в `.env`.
+
+Если Python 3.11+ не найден, скрипт подскажет `brew install python@3.11` (мак) или установку
+через пакетный менеджер дистрибутива (линукс); автоустановки Python, в отличие от Windows, нет.
+
 ## Manual Install
+
+Windows:
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
+pip install -e ".[dev]"
+```
+
+macOS / Linux:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 

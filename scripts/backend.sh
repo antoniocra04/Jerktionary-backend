@@ -633,7 +633,11 @@ run_backend() {
     ensure_gpu_settings
     ensure_dependencies
     select_models
-    check_ollama
+    local llm_provider
+    llm_provider="$(get_env_value "LLM_PROVIDER")"
+    if [ "$llm_provider" = "ollama" ] || [ -z "$llm_provider" ]; then
+        check_ollama
+    fi
     ensure_whisper_model
     write_step "starting FastAPI http://$HOST_ADDRESS:$PORT"
     exec "$PYTHON" -m uvicorn app.main:app --host "$HOST_ADDRESS" --port "$PORT" --reload

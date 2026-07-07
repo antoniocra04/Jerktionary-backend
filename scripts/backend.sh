@@ -465,9 +465,49 @@ show_model_menu() {
     done
 }
 
+# Prompt for an API key. If $1 (current value) is non-empty, offer to keep it
+# (Enter) or re-enter. Never echoes the stored value beyond a 4-char mask.
+read_secret_with_keep() {
+    local current="$1" prompt="$2" entered mask
+    if [ -n "$current" ]; then
+        mask="$(printf '%s' "$current" | cut -c1-4)$(printf '%*s' $(( ${#current} > 4 ? ${#current} - 4 : 0 )) '' | tr ' ' '*')"
+        read -r -p "$prompt [Enter = оставить текущий ($mask)]: " entered || { echo ""; exit 130; }
+        [ -z "$entered" ] && { printf '%s' "$current"; return; }
+        printf '%s' "$entered"
+    else
+        read -r -p "$prompt: " entered || { echo ""; exit 130; }
+        printf '%s' "$entered"
+    fi
+}
+
+# Prints the LLM API provider menu and echoes the chosen provider key. Default
+# index is the entry matching $1, else 1.
+show_llm_api_provider_menu() {
+    local current="$1" default_idx=1 i=0 key count num
+    echo "LLM-провайдер:"
+    for key in "${LLM_PROVIDER_KEYS[@]}"; do
+        printf '  [%d] %-22s %s\n' "$((i+1))" "${LLM_PROVIDER_LABELS[$i]}" "${LLM_PROVIDER_DEFAULT_MODELS[$i]}"
+        [ "$key" = "$current" ] && default_idx=$((i+1))
+        i=$((i+1))
+    done
+    count="${#LLM_PROVIDER_KEYS[@]}"
+    while true; do
+        read -r -p "LLM-провайдер [$default_idx]: " num || { echo ""; exit 130; }
+        num="$(printf '%s' "$num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        [ -z "$num" ] && num=$default_idx
+        case "$num" in *[!0-9]*|'') write_warn "Нужно число от 1 до $count"; continue ;; esac
+        if [ "$num" -ge 1 ] && [ "$num" -le "$count" ]; then break; fi
+        write_warn "Нужно число от 1 до $count"
+    done
+    printf '%s' "${LLM_PROVIDER_KEYS[$((num-1))]}"
+}
+
 select_models() {
-    # For each model family the user is FIRST asked local-vs-API, then shown the
-    # relevant submenu: local → model menu, API → deferred to select_providers.
+    # For each family (LLM, Whisper) the user is FIRST asked local-vs-API, then the
+    # relevant submenu right away (no second pass):
+    #   LLM     local → qwen model menu   | api → provider menu + key + model
+    #   Whisper local → whisper size menu | api → key prompt
+    # All choices written into .env in one place. Skipped with -SkipModelSelect.
     if [ "$SKIP_MODEL_SELECT" -eq 1 ]; then
         write_ok "model selection skipped (-SkipModelSelect)"
         return
@@ -507,7 +547,24 @@ select_models() {
                 write_ok "LLM-модель без изменений: $current_llm"
             fi
         else
-            write_ok "LLM: через API — провайдер и ключ спрашиваются далее"
+            local chosen_key chosen_idx key model cur_model
+            chosen_key="$(show_llm_api_provider_menu "$current_llm_provider")"
+            chosen_idx=0
+            local i=0
+            for key in "${LLM_PROVIDER_KEYS[@]}"; do
+                [ "$key" = "$chosen_key" ] && { chosen_idx=$i; break; }
+                i=$((i+1))
+            done
+            set_env_value "LLM_PROVIDER" "$chosen_key"
+            write_ok "LLM_PROVIDER=$chosen_key"
+            key="$(read_secret_with_keep "$(get_env_value "LLM_API_KEY" "")" "LLM API key")"
+            set_env_value "LLM_API_KEY" "$key"
+            cur_model="$(get_env_value "LLM_API_MODEL" "")"
+            read -r -p "Модель [Enter = ${LLM_PROVIDER_DEFAULT_MODELS[$chosen_idx]}]: " model || { echo ""; exit 130; }
+            model="$(printf '%s' "$model" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [ -z "$model" ] && model="$cur_model"
+            set_env_value "LLM_API_MODEL" "$model"
+            write_ok "LLM_API_MODEL=$model"
         fi
     else
         write_warn "LLM disabled in .env — пропуск выбора LLM-модели"
@@ -541,117 +598,14 @@ select_models() {
                 write_ok "Whisper-модель без изменений: $current_whisper"
             fi
         else
-            write_ok "Whisper: через API — провайдер и ключ спрашиваются далее"
-        fi
-    else
-        write_warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
-    fi
-    echo ""
-}
-
-# Prompt for an API key. If $1 (current value) is non-empty, offer to keep it
-# (Enter) or re-enter. Never echoes the stored value beyond a 4-char mask.
-read_secret_with_keep() {
-    local current="$1" prompt="$2" entered mask
-    if [ -n "$current" ]; then
-        mask="$(printf '%s' "$current" | cut -c1-4)$(printf '%*s' $(( ${#current} > 4 ? ${#current} - 4 : 0 )) '' | tr ' ' '*')"
-        read -r -p "$prompt [Enter = оставить текущий ($mask)]: " entered || { echo ""; exit 130; }
-        [ -z "$entered" ] && { printf '%s' "$current"; return; }
-        printf '%s' "$entered"
-    else
-        read -r -p "$prompt: " entered || { echo ""; exit 130; }
-        printf '%s' "$entered"
-    fi
-}
-
-select_providers() {
-    if [ "$SKIP_PROVIDER_SELECT" -eq 1 ]; then
-        write_ok "provider selection skipped (-SkipProviderSelect)"
-        return
-    fi
-    echo ""
-    write_step "Выбор провайдеров"
-
-    # ── LLM ──
-    # Only prompt for the API provider/key when the user chose the API mode in
-    # select_models (LLM_PROVIDER != ollama). Local mode is fully configured by
-    # the qwen model menu there and needs nothing here.
-    if test_env_enabled "LLM_ENABLED"; then
-        local current_provider
-        current_provider="$(get_env_value "LLM_PROVIDER" "ollama")"
-        if [ "$current_provider" = "ollama" ] || [ -z "$current_provider" ]; then
-            write_ok "LLM: локальный режим — выбор API-провайдера пропущен"
-        else
-            local default_idx i chosen_key chosen_idx count num key model cur_model
-            echo ""
-            echo "LLM-провайдер:"
-            default_idx=1
-            i=0
-            for key in "${LLM_PROVIDER_KEYS[@]}"; do
-                printf '  [%d] %-22s %s\n' "$((i+1))" "${LLM_PROVIDER_LABELS[$i]}" "${LLM_PROVIDER_DEFAULT_MODELS[$i]}"
-                [ "$key" = "$current_provider" ] && default_idx=$((i+1))
-                i=$((i+1))
-            done
-            count="${#LLM_PROVIDER_KEYS[@]}"
-            while true; do
-                read -r -p "LLM-провайдер [$default_idx]: " num || { echo ""; exit 130; }
-                num="$(printf '%s' "$num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-                [ -z "$num" ] && num=$default_idx
-                case "$num" in *[!0-9]*|'') write_warn "Нужно число от 1 до $count"; continue ;; esac
-                if [ "$num" -ge 1 ] && [ "$num" -le "$count" ]; then break; fi
-                write_warn "Нужно число от 1 до $count"
-            done
-            chosen_key="${LLM_PROVIDER_KEYS[$((num-1))]}"
-            chosen_idx=$((num-1))
-            if [ "$chosen_key" != "$current_provider" ]; then
-                set_env_value "LLM_PROVIDER" "$chosen_key"
-                write_ok "LLM_PROVIDER=$chosen_key"
-            else
-                write_ok "LLM-провайдер без изменений: $chosen_key"
-            fi
-
-            key="$(read_secret_with_keep "$(get_env_value "LLM_API_KEY" "")" "LLM API key")"
-            set_env_value "LLM_API_KEY" "$key"
-            cur_model="$(get_env_value "LLM_API_MODEL" "")"
-            read -r -p "Модель [Enter = ${LLM_PROVIDER_DEFAULT_MODELS[$chosen_idx]}]: " model || { echo ""; exit 130; }
-            model="$(printf '%s' "$model" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-            [ -z "$model" ] && model="$cur_model"
-            set_env_value "LLM_API_MODEL" "$model"
-            write_ok "LLM_API_MODEL=$model"
-        fi
-    else
-        write_warn "LLM disabled in .env — пропуск выбора LLM-провайдера"
-    fi
-
-    # ── Whisper ──
-    if test_env_enabled "WHISPER_ENABLED"; then
-        local current_w wdefault num wchoice
-        current_w="$(get_env_value "WHISPER_PROVIDER" "local")"
-        echo ""
-        echo "Whisper-провайдер:"
-        echo "  [1] Локально (faster-whisper)"
-        echo "  [2] Через API (OpenAI/Groq/совместимый)"
-        if [ "$current_w" = "api" ]; then wdefault=2; else wdefault=1; fi
-        while true; do
-            read -r -p "Whisper-провайдер [$wdefault]: " num || { echo ""; exit 130; }
-            num="$(printf '%s' "$num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-            [ -z "$num" ] && num=$wdefault
-            case "$num" in 1|2) break ;; *) write_warn "Нужно 1 или 2" ;; esac
-        done
-        if [ "$num" -eq 2 ]; then wchoice="api"; else wchoice="local"; fi
-        if [ "$wchoice" != "$current_w" ]; then
-            set_env_value "WHISPER_PROVIDER" "$wchoice"
-            write_ok "WHISPER_PROVIDER=$wchoice"
-        else
-            write_ok "Whisper-провайдер без изменений: $wchoice"
-        fi
-        if [ "$wchoice" = "api" ]; then
+            set_env_value "WHISPER_PROVIDER" "api"
+            write_ok "WHISPER_PROVIDER=api"
             local wkey
             wkey="$(read_secret_with_keep "$(get_env_value "WHISPER_API_KEY" "")" "Whisper API key")"
             set_env_value "WHISPER_API_KEY" "$wkey"
         fi
     else
-        write_warn "WHISPER disabled in .env — пропуск выбора Whisper-провайдера"
+        write_warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
     fi
     echo ""
 }
@@ -663,7 +617,6 @@ run_backend() {
     ensure_gpu_settings
     ensure_dependencies
     select_models
-    select_providers
     check_ollama
     ensure_whisper_model
     write_step "starting FastAPI http://$HOST_ADDRESS:$PORT"

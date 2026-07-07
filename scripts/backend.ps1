@@ -585,14 +585,56 @@ function Show-ModelMenu {
     }
 }
 
+function Read-SecretWithKeep {
+    # Prompt for an API key. If $Current is non-empty, offer to keep it (Enter) or
+    # re-enter. Never echoes the stored value — only a masked hint. Returns the
+    # chosen value (the existing one on keep, or the typed one).
+    param([string]$Prompt, [string]$Current = "")
+
+    if ($Current) {
+        $Mask = $Current.Substring(0, [Math]::Min(4, $Current.Length)) + ("*" * [Math]::Max(0, $Current.Length - 4))
+        $Entered = Read-Host "$Prompt [Enter = оставить текущий ($Mask)]"
+        if (-not $Entered) {
+            return $Current
+        }
+        return $Entered
+    }
+    return Read-Host $Prompt
+}
+
+function Show-LlmApiProviderMenu {
+    # Returns the chosen $LlmProviders entry (hashtable). Default index is the
+    # entry whose key matches $CurrentValue, else 1.
+    param([string]$CurrentValue = "")
+    Write-Host "LLM-провайдер:"
+    $LabelWidth = ($LlmProviders | ForEach-Object { $_.label.Length } | Measure-Object -Maximum).Maximum
+    $DefaultIndex = 0
+    for ($I = 0; $I -lt $LlmProviders.Count; $I++) {
+        $P = $LlmProviders[$I]
+        $Padded = $P.label.PadRight($LabelWidth)
+        Write-Host ("  [{0}] {1}   {2}" -f ($I + 1), $Padded, $P.default_model)
+        if ($P.key -eq $CurrentValue) { $DefaultIndex = $I }
+    }
+    while ($true) {
+        $Input = Read-Host ("LLM-провайдер [$($DefaultIndex + 1)]")
+        $Trimmed = "$Input".Trim()
+        $Num = if (-not $Trimmed) { $DefaultIndex + 1 } else { 0 }
+        if (-not $Trimmed -or ($Trimmed -match '^\d+$' -and $Num -ge 1 -and $Num -le $LlmProviders.Count)) {
+            if ($Trimmed) { $Num = [int]$Trimmed }
+            return $LlmProviders[$Num - 1]
+        }
+        Write-Warn "Нужно число от 1 до $($LlmProviders.Count)"
+    }
+}
+
 function Select-Models {
     # Interactive model/mode picker run before the backend starts.
     #
-    # For each model family (LLM, Whisper) the user is FIRST asked whether to run
-    # locally or through an API key, and only THEN shown the relevant submenu:
-    #   LLM     local → qwen model menu   | api → leave to Select-Providers
-    #   Whisper local → whisper size menu | api → leave to Select-Providers
-    # Writes the choices into .env. Skipped with -SkipModelSelect.
+    # For each family (LLM, Whisper) the user is FIRST asked local-vs-API, then the
+    # relevant submenu right away (no second pass):
+    #   LLM     local → qwen model menu   | api → provider menu + key + model
+    #   Whisper local → whisper size menu | api → key prompt
+    # Writes all choices into .env in one place. Skipped with -SkipModelSelect.
     if ($SkipModelSelect) {
         Write-Ok "model selection skipped (-SkipModelSelect)"
         return
@@ -620,7 +662,6 @@ function Select-Models {
         }
 
         if ($LlmModeNum -eq 1) {
-            # Local: choose the Ollama model. The API provider/key are irrelevant.
             Set-EnvValue "LLM_PROVIDER" "ollama"
             $CurrentLlm = Get-EnvValue "OLLAMA_MODEL" ""
             $Choice = Show-ModelMenu -Title "Выбор LLM-модели (Ollama)" -Options $LlmModels -CurrentValue $CurrentLlm
@@ -631,7 +672,16 @@ function Select-Models {
                 Write-Ok "LLM-модель без изменений: $CurrentLlm"
             }
         } else {
-            Write-Ok "LLM: через API — провайдер и ключ спрашиваются далее"
+            $Chosen = Show-LlmApiProviderMenu -CurrentValue $CurrentLlmProvider
+            Set-EnvValue "LLM_PROVIDER" $Chosen.key
+            Write-Ok "LLM_PROVIDER=$($Chosen.key)"
+            $Key = Read-SecretWithKeep -Prompt "LLM API key" -Current (Get-EnvValue "LLM_API_KEY" "")
+            Set-EnvValue "LLM_API_KEY" $Key
+            $CurModel = Get-EnvValue "LLM_API_MODEL" ""
+            $ModelInput = Read-Host "Модель [Enter = $($Chosen.default_model)]"
+            $ModelVal = if ($ModelInput) { $ModelInput } else { $CurModel }
+            Set-EnvValue "LLM_API_MODEL" $ModelVal
+            Write-Ok "LLM_API_MODEL=$ModelVal"
         }
     } else {
         Write-Warn "LLM disabled in .env — пропуск выбора LLM-модели"
@@ -666,124 +716,13 @@ function Select-Models {
                 Write-Ok "Whisper-модель без изменений: $CurrentWhisper"
             }
         } else {
-            Write-Ok "Whisper: через API — провайдер и ключ спрашиваются далее"
-        }
-    } else {
-        Write-Warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
-    }
-
-    Write-Host ""
-}
-
-function Read-SecretWithKeep {
-    # Prompt for an API key. If $Current is non-empty, offer to keep it (Enter) or
-    # re-enter. Never echoes the stored value — only a masked hint. Returns the
-    # chosen value (the existing one on keep, or the typed one).
-    param([string]$Prompt, [string]$Current = "")
-
-    if ($Current) {
-        $Mask = $Current.Substring(0, [Math]::Min(4, $Current.Length)) + ("*" * [Math]::Max(0, $Current.Length - 4))
-        $Entered = Read-Host "$Prompt [Enter = оставить текущий ($Mask)]"
-        if (-not $Entered) {
-            return $Current
-        }
-        return $Entered
-    }
-    return Read-Host $Prompt
-}
-
-function Select-Providers {
-    # Interactive provider + key picker run before the backend starts. Writes the
-    # chosen LLM_PROVIDER / LLM_API_KEY / WHISPER_PROVIDER / WHISPER_API_KEY into
-    # .env so startup mounts the right client. Skipped with -SkipProviderSelect.
-    if ($SkipProviderSelect) {
-        Write-Ok "provider selection skipped (-SkipProviderSelect)"
-        return
-    }
-
-    Write-Host ""
-    Write-Host "==> Выбор провайдеров" -ForegroundColor Cyan
-
-    # ── LLM ──
-    # Only prompt for the API provider/key when the user chose the API mode in
-    # Select-Models (LLM_PROVIDER != ollama). The local mode is fully configured by
-    # the qwen model menu there and needs nothing here.
-    if (Test-EnvEnabled "LLM_ENABLED") {
-        $CurrentProvider = Get-EnvValue "LLM_PROVIDER" "ollama"
-        if ($CurrentProvider -eq "ollama" -or $CurrentProvider -eq "") {
-            Write-Ok "LLM: локальный режим — выбор API-провайдера пропущен"
-        } else {
-            Write-Host ""
-            Write-Host "LLM-провайдер:"
-            $LabelWidth = ($LlmProviders | ForEach-Object { $_.label.Length } | Measure-Object -Maximum).Maximum
-            $DefaultIndex = 0
-            for ($I = 0; $I -lt $LlmProviders.Count; $I++) {
-                $P = $LlmProviders[$I]
-                $Padded = $P.label.PadRight($LabelWidth)
-                Write-Host ("  [{0}] {1}   {2}" -f ($I + 1), $Padded, $P.default_model)
-                if ($P.key -eq $CurrentProvider) { $DefaultIndex = $I }
-            }
-            while ($true) {
-                $Input = Read-Host ("LLM-провайдер [$($DefaultIndex + 1)]")
-                $Trimmed = "$Input".Trim()
-                $Num = if (-not $Trimmed) { $DefaultIndex + 1 } else { 0 }
-                if (-not $Trimmed -or ($Trimmed -match '^\d+$' -and $Num -ge 1 -and $Num -le $LlmProviders.Count)) {
-                    if ($Trimmed) { $Num = [int]$Trimmed }
-                    $Chosen = $LlmProviders[$Num - 1]
-                    break
-                }
-                Write-Warn "Нужно число от 1 до $($LlmProviders.Count)"
-            }
-            if ($Chosen.key -ne $CurrentProvider) {
-                Set-EnvValue "LLM_PROVIDER" $Chosen.key
-                Write-Ok "LLM_PROVIDER=$($Chosen.key)"
-            } else {
-                Write-Ok "LLM-провайдер без изменений: $($Chosen.key)"
-            }
-
-            $Key = Read-SecretWithKeep -Prompt "LLM API key" -Current (Get-EnvValue "LLM_API_KEY" "")
-            Set-EnvValue "LLM_API_KEY" $Key
-            $CurModel = Get-EnvValue "LLM_API_MODEL" ""
-            $ModelInput = Read-Host "Модель [Enter = $($Chosen.default_model)]"
-            $ModelVal = if ($ModelInput) { $ModelInput } else { $CurModel }
-            Set-EnvValue "LLM_API_MODEL" $ModelVal
-            Write-Ok "LLM_API_MODEL=$ModelVal"
-        }
-    } else {
-        Write-Warn "LLM disabled in .env — пропуск выбора LLM-провайдера"
-    }
-
-    # ── Whisper ──
-    if (Test-EnvEnabled "WHISPER_ENABLED") {
-        $CurrentWhisper = Get-EnvValue "WHISPER_PROVIDER" "local"
-        Write-Host ""
-        Write-Host "Whisper-провайдер:"
-        Write-Host "  [1] Локально (faster-whisper)"
-        Write-Host "  [2] Через API (OpenAI/Groq/совместимый)"
-        $WDefault = if ($CurrentWhisper -eq "api") { 2 } else { 1 }
-        while ($true) {
-            $Input = Read-Host ("Whisper-провайдер [$WDefault]")
-            $Trimmed = "$Input".Trim()
-            $Num = if (-not $Trimmed) { $WDefault } else { 0 }
-            if (-not $Trimmed -or ($Trimmed -match '^[12]$')) {
-                if ($Trimmed) { $Num = [int]$Trimmed }
-                break
-            }
-            Write-Warn "Нужно 1 или 2"
-        }
-        $WhisperChoice = if ($Num -eq 2) { "api" } else { "local" }
-        if ($WhisperChoice -ne $CurrentWhisper) {
-            Set-EnvValue "WHISPER_PROVIDER" $WhisperChoice
-            Write-Ok "WHISPER_PROVIDER=$WhisperChoice"
-        } else {
-            Write-Ok "Whisper-провайдер без изменений: $WhisperChoice"
-        }
-        if ($WhisperChoice -eq "api") {
+            Set-EnvValue "WHISPER_PROVIDER" "api"
+            Write-Ok "WHISPER_PROVIDER=api"
             $Key = Read-SecretWithKeep -Prompt "Whisper API key" -Current (Get-EnvValue "WHISPER_API_KEY" "")
             Set-EnvValue "WHISPER_API_KEY" $Key
         }
     } else {
-        Write-Warn "WHISPER disabled in .env — пропуск выбора Whisper-провайдера"
+        Write-Warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
     }
 
     Write-Host ""
@@ -795,7 +734,6 @@ function Run-Backend {
     Ensure-GpuSettings
     Ensure-Dependencies
     Select-Models
-    Select-Providers
     Check-Ollama
     Ensure-WhisperModel
 

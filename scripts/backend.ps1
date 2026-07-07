@@ -618,11 +618,21 @@ function Show-LlmApiProviderMenu {
     while ($true) {
         $Input = Read-Host ("LLM-провайдер [$($DefaultIndex + 1)]")
         $Trimmed = "$Input".Trim()
-        $Num = if (-not $Trimmed) { $DefaultIndex + 1 } else { 0 }
-        if (-not $Trimmed -or ($Trimmed -match '^\d+$' -and $Num -ge 1 -and $Num -le $LlmProviders.Count)) {
-            if ($Trimmed) { $Num = [int]$Trimmed }
+
+        if (-not $Trimmed) {
+            return $LlmProviders[$DefaultIndex]
+        }
+
+        if ($Trimmed -notmatch '^\d+$') {
+            Write-Warn "Нужно число от 1 до $($LlmProviders.Count)"
+            continue
+        }
+
+        $Num = [int]$Trimmed
+        if ($Num -ge 1 -and $Num -le $LlmProviders.Count) {
             return $LlmProviders[$Num - 1]
         }
+
         Write-Warn "Нужно число от 1 до $($LlmProviders.Count)"
     }
 }
@@ -734,7 +744,10 @@ function Run-Backend {
     Ensure-GpuSettings
     Ensure-Dependencies
     Select-Models
-    Check-Ollama
+    $LlmProvider = Get-EnvValue "LLM_PROVIDER"
+    if ($LlmProvider -eq "ollama" -or -not $LlmProvider) {
+        Check-Ollama
+    }
     Ensure-WhisperModel
 
     Write-Step "starting FastAPI http://$HostAddress`:$Port"

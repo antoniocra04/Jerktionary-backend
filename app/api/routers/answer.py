@@ -10,7 +10,6 @@ from app.api.schemas.answer import AnswerRequest
 from app.core.dependencies import get_app_state
 from app.core.errors import LlmResponseError, LlmUnavailableError
 from app.core.state import AppState
-from app.services.llm_selector import select_llm_provider
 
 router = APIRouter(prefix="/api/answer", tags=["answer"])
 
@@ -30,21 +29,13 @@ async def answer_stream(
 ) -> StreamingResponse:
     async def event_source() -> AsyncIterator[str]:
         try:
-            provider = select_llm_provider(
-                state.settings,
-                provider=request.llm.provider,
-                api_key=request.llm.api_key,
-                model=request.llm.model,
-                base_url=request.llm.base_url,
-                service=request.llm.service,
-            )
             async for snapshot in state.answer_service.answer_stream(
                 question=request.question,
                 context=request.context,
                 deep=request.deep,
                 profile=request.profile,
                 meeting_context=request.meeting_context,
-                provider=provider,
+                provider=None,
             ):
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
         except LlmUnavailableError:

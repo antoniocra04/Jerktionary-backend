@@ -8,7 +8,6 @@ from app.core.errors import AsrUnavailableError
 from app.domain.entities.term import Term
 from app.domain.entities.transcript import TranscriptUpdate
 from app.domain.interfaces.asr import AsrStream
-from app.infrastructure.asr.api_asr import ApiTranscriptionStream
 from app.services.asr_service import AsrService
 from app.services.term_extractor_service import TermExtractorService
 
@@ -25,22 +24,16 @@ class TranscriptService:
         self._settings = settings
 
     async def create_session(self, asr: AsrChoice | None = None) -> TranscriptSession:
-        stream = await self._create_stream(asr)
-        return TranscriptSession(stream, self._term_service)
-
-    async def _create_stream(self, asr: AsrChoice | None) -> AsrStream:
-        if asr is not None and asr.provider == "api":
-            return ApiTranscriptionStream(
-                self._settings,
-                api_key=asr.api_key,
-                model=asr.model,
-                base_url=asr.base_url,
-            )
+        # The ASR provider is chosen at backend startup (WHISPER_PROVIDER in .env)
+        # and mounted into self._asr_service. The legacy per-connection `asr` choice
+        # is accepted for backward compatibility but no longer affects routing.
+        del asr  # unused — provider is fixed at startup
         if self._asr_service is None:
             raise AsrUnavailableError(
                 "Local Whisper is disabled (WHISPER_ENABLED=false); choose the API provider"
             )
-        return await self._asr_service.create_stream()
+        stream = await self._asr_service.create_stream()
+        return TranscriptSession(stream, self._term_service)
 
 
 class TranscriptSession:

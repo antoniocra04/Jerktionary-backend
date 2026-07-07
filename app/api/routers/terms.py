@@ -11,7 +11,6 @@ from app.api.schemas.terms import ExplainTermRequest, ExplainTermResponse
 from app.core.dependencies import get_app_state
 from app.core.errors import LlmResponseError, LlmUnavailableError
 from app.core.state import AppState
-from app.services.llm_selector import select_llm_provider
 
 router = APIRouter(prefix="/api/terms", tags=["terms"])
 
@@ -35,19 +34,14 @@ async def explain_term(
     state: AppState = Depends(get_app_state),
 ) -> ExplainTermResponse:
     normalized = state.term_extractor_service.normalize(request.term)
-    provider = select_llm_provider(
-        state.settings,
-        provider=request.llm.provider,
-        api_key=request.llm.api_key,
-        model=request.llm.model,
-        base_url=request.llm.base_url,
-        service=request.llm.service,
-    )
+    # The LLM provider is chosen at backend startup (LLM_PROVIDER in .env); the
+    # request no longer carries provider/key — pass None so the service uses the
+    # startup-mounted provider.
     explanation = await state.explanation_service.explain(
         term=request.term,
         normalized_term=normalized,
         context=request.context,
-        provider=provider,
+        provider=None,
     )
     return ExplainTermResponse(
         title=explanation.title,
@@ -75,19 +69,11 @@ async def explain_term_stream(
 
     async def event_source() -> AsyncIterator[str]:
         try:
-            provider = select_llm_provider(
-                state.settings,
-                provider=request.llm.provider,
-                api_key=request.llm.api_key,
-                model=request.llm.model,
-                base_url=request.llm.base_url,
-                service=request.llm.service,
-            )
             async for snapshot in state.explanation_service.explain_stream(
                 term=request.term,
                 normalized_term=normalized,
                 context=request.context,
-                provider=provider,
+                provider=None,
             ):
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
         except LlmUnavailableError:

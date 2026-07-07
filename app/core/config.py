@@ -75,6 +75,23 @@ class Settings(BaseSettings):
     ollama_think: bool = False
     llm_context_chars: int = 500
 
+    # Provider selection chosen at backend startup (interactive launcher writes
+    # these into .env). Keys map to app.core.providers.LLM_PROVIDERS. The local
+    # Ollama path uses ollama_base_url/ollama_model above; the API path uses the
+    # three llm_api_* fields together with the provider's catalog defaults.
+    llm_provider: str = "ollama"
+    llm_api_key: str = ""
+    llm_api_model: str = ""
+    llm_api_base_url: str = ""
+
+    # Whisper provider chosen at startup: "local" (faster-whisper on this box) or
+    # "api" (OpenAI-compatible /audio/transcriptions). The api fields mirror the
+    # LLM ones — empty means "use the OpenAI Whisper default".
+    whisper_provider: str = "local"
+    whisper_api_key: str = ""
+    whisper_api_model: str = ""
+    whisper_api_base_url: str = ""
+
     term_min_chars: int = 3
     term_max_words: int = 5
     term_confidence_threshold: float = 0.68

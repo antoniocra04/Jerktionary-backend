@@ -6,11 +6,16 @@ from loguru import logger
 
 from app.core.config import Settings
 from app.core.errors import StartupError
+from app.core.providers import LLM_PROVIDERS
 from app.core.state import AppState, Readiness, ServiceStatus
+from app.domain.interfaces.llm import LlmProvider
+from app.infrastructure.asr.api_asr_provider import ApiAsrProvider
 from app.infrastructure.asr.faster_whisper_asr import FasterWhisperAsrProvider
 from app.infrastructure.db.repositories.explanation_repository import SQLiteExplanationRepository
 from app.infrastructure.db.sqlite import SQLiteDatabase
+from app.infrastructure.llm.anthropic_client import AnthropicLlmProvider
 from app.infrastructure.llm.ollama_client import OllamaLlmProvider
+from app.infrastructure.llm.openai_client import OpenAiLlmProvider
 from app.infrastructure.nlp.natasha_extractor import NatashaTermExtractor
 from app.services.answer_service import AnswerService
 from app.services.asr_service import AsrService
@@ -29,21 +34,28 @@ async def create_app_state(settings: Settings) -> AppState:
     resources.append(sqlite)
     repository = SQLiteExplanationRepository(sqlite)
 
-    # Local Whisper is optional: API-only users skip the multi-GB model load entirely.
+    # Whisper provider is chosen at backend startup. "local" loads faster-whisper
+    # on this box (multi-GB model, optional via WHISPER_ENABLED); "api" mounts the
+    # OpenAI-compatible /audio/transcriptions client with key/base_url from .env.
     asr_service: AsrService | None = None
     whisper_status = ServiceStatus(
         False, required=False, details="disabled (WHISPER_ENABLED=false)"
     )
     if settings.whisper_enabled:
-        try:
-            asr_provider = FasterWhisperAsrProvider(settings)
-            await asr_provider.load()
-        except Exception as exc:
-            logger.exception("Whisper startup failed")
-            await _close_resources(resources)
-            raise StartupError(f"Whisper failed to load: {exc}") from exc
-        asr_service = AsrService(asr_provider)
-        whisper_status = ServiceStatus(True, details=settings.whisper_model)
+        if settings.whisper_provider.strip().lower() == "api":
+            asr_service = AsrService(ApiAsrProvider(settings))
+            model = settings.whisper_api_model.strip() or "whisper-1"
+            whisper_status = ServiceStatus(True, details=f"api ({model})")
+        else:
+            try:
+                asr_provider = FasterWhisperAsrProvider(settings)
+                await asr_provider.load()
+            except Exception as exc:
+                logger.exception("Whisper startup failed")
+                await _close_resources(resources)
+                raise StartupError(f"Whisper failed to load: {exc}") from exc
+            asr_service = AsrService(asr_provider)
+            whisper_status = ServiceStatus(True, details=settings.whisper_model)
 
     try:
         nlp_extractor = NatashaTermExtractor(settings)
@@ -53,14 +65,10 @@ async def create_app_state(settings: Settings) -> AppState:
         await _close_resources(resources)
         raise StartupError(f"Natasha failed to load: {exc}") from exc
 
-    llm_provider = OllamaLlmProvider(settings)
-    llm_ready = False
-    llm_details = "disabled"
-    if settings.llm_enabled:
-        llm_ready = await llm_provider.healthcheck()
-        llm_details = f"model={settings.ollama_model}" if llm_ready else "Ollama unavailable"
-    if llm_ready:
-        _spawn_llm_warmup(llm_provider)
+    # LLM provider is chosen at backend startup (LLM_PROVIDER in .env). "ollama"
+    # uses the on-box model below; any other key mounts a hosted provider with
+    # key/model/base_url from .env, resolved against the LLM_PROVIDERS catalog.
+    llm_provider, llm_ready, llm_details = await _build_llm_provider(settings)
 
     term_service = TermExtractorService(nlp_extractor)
     transcript_service = TranscriptService(asr_service, term_service, settings)
@@ -90,6 +98,54 @@ async def create_app_state(settings: Settings) -> AppState:
 
 # Strong refs so fire-and-forget warmup tasks aren't garbage-collected mid-run.
 _background_tasks: set[asyncio.Task[None]] = set()
+
+
+async def _build_llm_provider(
+    settings: Settings,
+) -> tuple[LlmProvider, bool, str]:
+    """Resolve the startup LLM provider from settings.llm_provider.
+
+    Returns (provider, ready, details). "ollama" (and empty) build the on-box
+    provider and healthcheck it; any other key builds the hosted provider from the
+    LLM_PROVIDERS catalog using llm_api_key/model/base_url (falling back to the
+    catalog defaults). Hosted providers are assumed ready — auth failures surface
+    on the first real request, not at boot.
+    """
+    provider_key = settings.llm_provider.strip().lower()
+    if not settings.llm_enabled:
+        # Still construct an Ollama stub so the service objects have a provider
+        # reference; the ready flag stays False and explain/answer raise.
+        return OllamaLlmProvider(settings), False, "disabled"
+
+    provider: LlmProvider
+    if provider_key in ("", "ollama"):
+        provider = OllamaLlmProvider(settings)
+        ready = await provider.healthcheck()
+        details = f"model={settings.ollama_model}" if ready else "Ollama unavailable"
+        if ready:
+            _spawn_llm_warmup(provider)
+        return provider, ready, details
+
+    preset = LLM_PROVIDERS.get(provider_key)
+    if preset is None:
+        raise StartupError(
+            f"Unknown LLM_PROVIDER '{provider_key}'. "
+            f"Valid: {', '.join(LLM_PROVIDERS)}"
+        )
+
+    api_key = settings.llm_api_key.strip()
+    if not api_key:
+        raise StartupError(
+            f"LLM_PROVIDER={provider_key} requires LLM_API_KEY (it is empty in .env)"
+        )
+    base_url = settings.llm_api_base_url.strip() or preset.base_url
+    model = settings.llm_api_model.strip() or preset.default_model
+
+    if preset.is_native_anthropic:
+        provider = AnthropicLlmProvider(settings, api_key=api_key, model=model, base_url=base_url)
+    else:
+        provider = OpenAiLlmProvider(settings, api_key=api_key, model=model, base_url=base_url)
+    return provider, True, f"{provider_key} ({model})"
 
 
 def _spawn_llm_warmup(provider: OllamaLlmProvider) -> None:

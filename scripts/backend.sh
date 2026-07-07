@@ -67,13 +67,29 @@ WHISPER_MODEL_NAMES=("large-v3-turbo" "large-v3" "medium" "small" "base" "tiny")
 WHISPER_MODEL_SIZES=("~1.6 GB" "~3.0 GB" "~1.5 GB" "~480 MB" "~145 MB" "~75 MB")
 WHISPER_MODEL_NOTES=("Рекомендуется: баланс скорости и качества" "Максимальное качество" "" "" "" "Самая быстрая")
 
-# LLM provider catalog — API providers only (mirrors app/core/providers.py
-# LLM_PROVIDERS minus "ollama"; the local branch of the launcher menu handles
-# Ollama via the qwen model menu). Parallel arrays at the same index.
-LLM_PROVIDER_KEYS=("openai" "anthropic" "deepseek" "zai" "minimax" "gemini")
-LLM_PROVIDER_LABELS=("OpenAI" "Anthropic Claude" "DeepSeek" "ZAI (GLM)" "MiniMax" "Google Gemini")
-LLM_PROVIDER_BASE_URLS=("https://api.openai.com/v1" "https://api.anthropic.com" "https://api.deepseek.com" "https://open.bigmodel.cn/api/paas/v4" "https://api.minimax.io/v1" "https://generativelanguage.googleapis.com/v1beta/openai")
-LLM_PROVIDER_DEFAULT_MODELS=("gpt-4o-mini" "claude-haiku-4-5" "deepseek-chat" "glm-4" "MiniMax-M2" "gemini-2.5-flash")
+# LLM provider catalog — loaded from the canonical Python source
+# (scripts/export_providers.py → app/core/providers.py). Ollama is excluded
+# because the local branch of the menu handles it via the qwen model menu.
+_load_providers() {
+    local json
+    json="$(python "$ROOT/scripts/export_providers.py" 2>/dev/null)" || true
+    if [ -z "$json" ]; then
+        LLM_PROVIDER_KEYS=()
+        LLM_PROVIDER_LABELS=()
+        LLM_PROVIDER_BASE_URLS=()
+        LLM_PROVIDER_DEFAULT_MODELS=()
+        return
+    fi
+    eval "$(echo "$json" | python -c "
+import json, sys
+data = json.load(sys.stdin)
+names = [('key','KEYS'),('label','LABELS'),('base_url','BASE_URLS'),('default_model','DEFAULT_MODELS')]
+for field, arr_name in names:
+    vals = ' '.join(repr(p[field]) if field != 'base_url' else repr(p.get(field,'')) for p in data)
+    print(f'LLM_PROVIDER_{arr_name}=({vals})')
+")"
+}
+_load_providers
 
 # ── .env helpers (direct ports of Get-EnvValue/Set-EnvValue/Test-EnvEnabled) ─
 get_env_value() {

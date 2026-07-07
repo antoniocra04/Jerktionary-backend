@@ -39,14 +39,15 @@ $WhisperModels = @(
 #   label        = menu label
 #   base_url     = used when LLM_API_BASE_URL is empty
 #   default_model= used when LLM_API_MODEL is empty
-$LlmProviders = @(
-    @{ key = "openai";    label = "OpenAI";            base_url = "https://api.openai.com/v1";                    default_model = "gpt-4o-mini" },
-    @{ key = "anthropic"; label = "Anthropic Claude";  base_url = "https://api.anthropic.com";                    default_model = "claude-haiku-4-5" },
-    @{ key = "deepseek";  label = "DeepSeek";          base_url = "https://api.deepseek.com";                     default_model = "deepseek-chat" },
-    @{ key = "zai";       label = "ZAI (GLM)";         base_url = "https://open.bigmodel.cn/api/paas/v4";         default_model = "glm-4" },
-    @{ key = "minimax";   label = "MiniMax";           base_url = "https://api.minimax.io/v1";                    default_model = "MiniMax-M2" },
-    @{ key = "gemini";    label = "Google Gemini";     base_url = "https://generativelanguage.googleapis.com/v1beta/openai"; default_model = "gemini-2.5-flash" }
-)
+# Load LLM providers from the canonical Python catalog (scripts/export_providers.py).
+# Keep in sync with app/core/providers.py — add/edit/remove entries there only.
+$_ExportScript = Join-Path $PSScriptRoot "export_providers.py"
+$_ExportJson = & python $_ExportScript 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "WARN failed to run export_providers.py; providers menu will be unavailable" -ForegroundColor Yellow
+    $_ExportJson = "[]"
+}
+$LlmProviders = $_ExportJson | ConvertFrom-Json
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $PrimaryVenvDir = Join-Path $Root ".venv"

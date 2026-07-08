@@ -300,6 +300,11 @@ test_import() {
 install_dependencies() {
     write_step "upgrading pip"
     invoke_checked "$PYTHON" -m pip install --upgrade pip
+    # Force setuptools<81 explicitly: pymorphy2 (via natasha) imports pkg_resources,
+    # which was removed in setuptools 82 (Feb 2026). A bare `pip install -e .`
+    # won't downgrade an already-installed setuptools 83 because the editable
+    # install reuses the resolved environment, so pin it here first.
+    invoke_checked "$PYTHON" -m pip install "setuptools<81"
     write_step "installing backend dependencies (this can take several minutes on first run)"
     # No --quiet: on macOS faster-whisper/numpy/natasha pull large wheels, and a
     # silent multi-minute install looks like a hang. pip's own progress is the

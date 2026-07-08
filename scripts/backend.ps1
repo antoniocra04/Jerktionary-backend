@@ -338,6 +338,13 @@ function Install-Dependencies {
     Write-Step "upgrading pip"
     Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "--upgrade", "pip")
 
+    # Force setuptools<81 explicitly: pymorphy2 (via natasha) imports pkg_resources,
+    # which was removed in setuptools 82 (Feb 2026). A bare `pip install -e .`
+    # won't downgrade an already-installed setuptools 83 because the editable
+    # install reuses the resolved environment, so pin it here first.
+    Write-Step "pinning setuptools < 81 (pymorphy2 needs pkg_resources)"
+    Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "setuptools<81")
+
     Write-Step "installing backend dependencies"
     if ($WithDev) {
         Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[dev]")

@@ -20,7 +20,10 @@ dependencies = [
     # interpreter, so on a fresh 3.13/3.14 venv (e.g. macOS via Homebrew) Natasha
     # crashes at startup with ModuleNotFoundError: pkg_resources. Declare it
     # explicitly to make the dependency real.
-    "setuptools>=69.0.0",
+    # IMPORTANT: pkg_resources was REMOVED in setuptools 82 (Feb 2026), and
+    # pymorphy2 still imports it, so cap below 81 until pymorphy2 migrates to
+    # importlib.metadata/resources.
+    "setuptools>=69.0.0,<81",
     "uvicorn[standard]>=0.30.0",
 ]
 

@@ -70,17 +70,29 @@ WHISPER_MODEL_NOTES=("Рекомендуется: баланс скорости 
 # LLM provider catalog — loaded from the canonical Python source
 # (scripts/export_providers.py → app/core/providers.py). Ollama is excluded
 # because the local branch of the menu handles it via the qwen model menu.
+#
+# Initialise the arrays up front so `set -u` never sees them unbound if the
+# dynamic load fails (e.g. no python3 yet on a fresh machine): the menu then
+# shows zero providers and the user is told to re-run, instead of crashing.
+LLM_PROVIDER_KEYS=()
+LLM_PROVIDER_LABELS=()
+LLM_PROVIDER_BASE_URLS=()
+LLM_PROVIDER_DEFAULT_MODELS=()
 _load_providers() {
-    local json
-    json="$(python "$ROOT/scripts/export_providers.py" 2>/dev/null)" || true
-    if [ -z "$json" ]; then
-        LLM_PROVIDER_KEYS=()
-        LLM_PROVIDER_LABELS=()
-        LLM_PROVIDER_BASE_URLS=()
-        LLM_PROVIDER_DEFAULT_MODELS=()
+    # This runs before the venv exists, so use whatever system python is around.
+    # macOS has `python3`; some Linux distros still alias it to `python`.
+    local sys_python
+    if command -v python3 >/dev/null 2>&1; then
+        sys_python="python3"
+    elif command -v python >/dev/null 2>&1; then
+        sys_python="python"
+    else
         return
     fi
-    eval "$(echo "$json" | python -c "
+    local json
+    json="$("$sys_python" "$ROOT/scripts/export_providers.py" 2>/dev/null)" || return
+    [ -z "$json" ] && return
+    eval "$(printf '%s' "$json" | "$sys_python" -c "
 import json, sys
 data = json.load(sys.stdin)
 names = [('key','KEYS'),('label','LABELS'),('base_url','BASE_URLS'),('default_model','DEFAULT_MODELS')]
@@ -500,13 +512,21 @@ read_secret_with_keep() {
 # index is the entry matching $1, else 1.
 show_llm_api_provider_menu() {
     local current="$1" default_idx=1 i=0 key count num
+    # Empty catalog means _load_providers failed (no python3, or missing module).
+    # On bash 3.2 (macOS) iterating an empty array under `set -u` would also
+    # crash, so guard explicitly and tell the user how to recover.
+    count="${#LLM_PROVIDER_KEYS[@]}"
+    if [ "$count" -eq 0 ]; then
+        write_warn "Список LLM-провайдеров не загрузился (нужен python3). Создайте venv (./backend.sh install) и запустите снова."
+        echo ""
+        exit 1
+    fi
     echo "LLM-провайдер:"
     for key in "${LLM_PROVIDER_KEYS[@]}"; do
         printf '  [%d] %-22s %s\n' "$((i+1))" "${LLM_PROVIDER_LABELS[$i]}" "${LLM_PROVIDER_DEFAULT_MODELS[$i]}"
         [ "$key" = "$current" ] && default_idx=$((i+1))
         i=$((i+1))
     done
-    count="${#LLM_PROVIDER_KEYS[@]}"
     while true; do
         read -r -p "LLM-провайдер [$default_idx]: " num || { echo ""; exit 130; }
         num="$(printf '%s' "$num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"

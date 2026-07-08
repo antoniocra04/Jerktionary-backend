@@ -38,7 +38,9 @@ def test_anthropic_is_the_only_native_client() -> None:
 def test_default_settings_use_local_providers() -> None:
     # Out of the box (no .env / fresh checkout) the backend defaults to local
     # Ollama + local Whisper — the interactive launcher then rewrites .env.
-    s = Settings()
+    # Construct with _env_file=None so the test checks the class defaults, not
+    # whatever happens to be in the developer's local .env right now.
+    s = Settings(_env_file=None)
     assert s.llm_provider == "ollama"
     assert s.llm_api_key == ""
     assert s.whisper_provider == "local"

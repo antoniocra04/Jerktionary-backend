@@ -355,6 +355,20 @@ function Install-Dependencies {
     Write-Ok "dependencies installed"
 }
 
+function Install-CudaDeps {
+    param([switch]$Force)
+    if ($IsMacOS -or $IsLinux) { return }
+    if (-not $Force) {
+        $NvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+        if (-not $NvidiaSmi) { return }
+        & $NvidiaSmi *> $null
+        if ($LASTEXITCODE -ne 0) { return }
+    }
+    Write-Step "installing CUDA runtime DLLs (cuBLAS + cudart)"
+    Invoke-Checked $Python @("-m", "pip", "install", "--upgrade", "--quiet", "-e", ".[cuda]")
+    Write-Ok "CUDA runtime DLLs installed"
+}
+
 function Ensure-Dependencies {
     # pkg_resources (setuptools) is included because natasha → pymorphy2 imports
     # it, and on Python ≥3.12 setuptools is no longer bundled with the
@@ -754,6 +768,7 @@ function Run-Backend {
     Ensure-Venv
     Ensure-ProjectFiles
     Ensure-GpuSettings
+    Install-CudaDeps
     Ensure-Dependencies
     Select-Models
     $LlmProvider = Get-EnvValue "LLM_PROVIDER"

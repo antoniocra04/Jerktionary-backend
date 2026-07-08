@@ -42,7 +42,12 @@ def _prefetch_weights(model_name: str) -> None:
     except ImportError:
         return
     # allow_patterns limits the fetch to the model files (skip README, etc.).
-    snapshot_download(repo, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
+    # If the repo is unavailable (404, network error, etc.), silently continue —
+    # faster-whisper's WhisperModel() will download weights on its own.
+    try:
+        snapshot_download(repo, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
+    except Exception:
+        pass
 
 
 def main() -> int:

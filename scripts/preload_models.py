@@ -4,10 +4,45 @@ import os
 
 # huggingface_hub (used by faster-whisper to fetch model weights) disables its
 # tqdm progress bar by default in recent versions, so a multi-hundred-MB
-# download looks like a silent hang. Force it on before anything imports the hub.
-os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+# download looks like a silent hang. FORCE it on (a plain assignment, not
+# setdefault — the env var may already be set to "1" by the hub or the shell,
+# and setdefault wouldn't override that). Must run before the hub is imported.
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
 
 from app.core.config import Settings  # noqa: E402
+
+# faster-whisper's model id → Hugging Face repo. large-v3-turbo is a special-case
+# alias; everything else maps to the Systran/faster-whisper-<name> repo. We use
+# this to pre-download weights with an explicit progress bar.
+_WHISPER_REPO = {
+    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
+    "large-v3": "Systran/faster-whisper-large-v3",
+    "large-v2": "Systran/faster-whisper-large-v2",
+    "medium": "Systran/faster-whisper-medium",
+    "small": "Systran/faster-whisper-small",
+    "base": "Systran/faster-whisper-base",
+    "tiny": "Systran/faster-whisper-tiny",
+}
+
+
+def _prefetch_weights(model_name: str) -> None:
+    """Pre-download the model weights with a visible progress bar.
+
+    faster-whisper's WhisperModel() downloads weights lazily via huggingface_hub,
+    whose tqdm bar is unreliable in subprocess contexts (silent on macOS). Calling
+    snapshot_download() first — with progress bars forced on — makes the download
+    visible. If the repo id is unknown or the hub isn't installed, we silently
+    fall back to faster-whisper's own (possibly silent) download.
+    """
+    repo = _WHISPER_REPO.get(model_name)
+    if repo is None:
+        return
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+    except ImportError:
+        return
+    # allow_patterns limits the fetch to the model files (skip README, etc.).
+    snapshot_download(repo, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
 
 
 def main() -> int:
@@ -18,6 +53,8 @@ def main() -> int:
         flush=True,
     )
     print("==> downloading weights on first run — this can take several minutes", flush=True)
+
+    _prefetch_weights(settings.whisper_model)
 
     try:
         from faster_whisper import WhisperModel  # type: ignore[import-untyped]

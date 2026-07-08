@@ -805,6 +805,18 @@ function Run-Backend {
     }
     Ensure-WhisperModel
 
+    Write-Host ""
+    Write-Host "Available on LAN (use these IPs from other computers):" -ForegroundColor Cyan
+    $LanIps = @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object {
+        $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and $_.PrefixOrigin -notin @("WellKnown")
+    })
+    if ($LanIps.Count -gt 0) {
+        $LanIps | ForEach-Object { Write-Host "    http://$($_.IPAddress):$Port" -ForegroundColor Green }
+    } else {
+        Write-Warn "    no LAN IPs found — check your network connection"
+    }
+    Write-Host ""
+
     Write-Step "starting FastAPI http://$HostAddress`:$Port"
     Invoke-Checked $Python @(
         "-m",

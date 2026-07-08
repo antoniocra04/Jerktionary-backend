@@ -674,6 +674,23 @@ run_backend() {
         check_ollama
     fi
     ensure_whisper_model
+    echo ""
+    echo "Available on LAN (use these IPs from other computers):"
+    local lan_ips=""
+    if command -v ip >/dev/null 2>&1; then
+        lan_ips="$(ip -4 addr show | grep -oP 'inet \K[\d.]+' | grep -v '127\.')"
+    elif command -v ifconfig >/dev/null 2>&1; then
+        lan_ips="$(ifconfig | grep 'inet ' | awk '{print $2}' | grep -v '127\.')"
+    fi
+    if [ -n "$lan_ips" ]; then
+        echo "$lan_ips" | while read -r ip; do
+            echo "    http://$ip:$PORT"
+        done
+    else
+        echo "    (no LAN IPs found — check your network connection)"
+    fi
+    echo ""
+
     write_step "starting FastAPI http://$HOST_ADDRESS:$PORT"
     exec "$PYTHON" -m uvicorn app.main:app --host "$HOST_ADDRESS" --port "$PORT" --reload
 }

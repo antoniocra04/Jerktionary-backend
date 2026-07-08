@@ -444,17 +444,20 @@ show_model_menu() {
     eval 'sizes=("${_menu_sizes[@]}")'
     eval 'notes=("${_menu_notes[@]}")'
 
-    echo ""
-    write_step "$title"
-    echo "Доступные модели:"
+    # All interactive output goes to stderr (>&2): this function returns its
+    # chosen value on stdout, so anything else printed to stdout would be
+    # captured by the $(...) call site and mangled into the result.
+    echo "" >&2
+    write_step "$title" >&2
+    echo "Доступные модели:" >&2
 
     local i=1 default_idx=1 in_list=0 idx=0
     local current_norm; current_norm="$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')"
     for name in "${names[@]}"; do
         local name_norm; name_norm="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
-        printf '  [%d] %-18s %s' "$i" "$name" "${sizes[$idx]}"
-        [ -n "${notes[$idx]}" ] && printf '   • %s' "${notes[$idx]}"
-        printf '\n'
+        printf '  [%d] %-18s %s' "$i" "$name" "${sizes[$idx]}" >&2
+        [ -n "${notes[$idx]}" ] && printf '   • %s' "${notes[$idx]}" >&2
+        printf '\n' >&2
         if [ "$name_norm" = "$current_norm" ] && [ -n "$current_norm" ]; then
             default_idx=$i; in_list=1
         fi
@@ -464,7 +467,7 @@ show_model_menu() {
     local keep_current=0
     if [ -n "$current_norm" ] && [ "$in_list" -eq 0 ]; then
         keep_current=1
-        printf '  [0] Оставить текущую: %s\n' "$current"
+        printf '  [0] Оставить текущую: %s\n' "$current" >&2
     fi
 
     local max_choice=${#names[@]}
@@ -481,7 +484,7 @@ show_model_menu() {
             printf '%s' "${names[$((default_idx-1))]}"; return
         fi
         case "$input" in
-            ''|*[!0-9]*) write_warn "Нужно число от 0 до $max_choice"; continue ;;
+            ''|*[!0-9]*) write_warn "Нужно число от 0 до $max_choice" >&2; continue ;;
         esac
         if [ "$input" -eq 0 ] && [ "$keep_current" -eq 1 ]; then
             printf '%s' "$current"; return
@@ -489,7 +492,7 @@ show_model_menu() {
         if [ "$input" -ge 1 ] && [ "$input" -le "$max_choice" ]; then
             printf '%s' "${names[$((input-1))]}"; return
         fi
-        write_warn "Нужно число от 0 до $max_choice"
+        write_warn "Нужно число от 0 до $max_choice" >&2
     done
 }
 
@@ -521,9 +524,12 @@ show_llm_api_provider_menu() {
         echo ""
         exit 1
     fi
-    echo "LLM-провайдер:"
+    # All interactive output goes to stderr (>&2): this function returns its
+    # chosen value on stdout, so anything else printed to stdout would be
+    # captured by the $(...) call site and mangled into the result.
+    echo "LLM-провайдер:" >&2
     for key in "${LLM_PROVIDER_KEYS[@]}"; do
-        printf '  [%d] %-22s %s\n' "$((i+1))" "${LLM_PROVIDER_LABELS[$i]}" "${LLM_PROVIDER_DEFAULT_MODELS[$i]}"
+        printf '  [%d] %-22s %s\n' "$((i+1))" "${LLM_PROVIDER_LABELS[$i]}" "${LLM_PROVIDER_DEFAULT_MODELS[$i]}" >&2
         [ "$key" = "$current" ] && default_idx=$((i+1))
         i=$((i+1))
     done
@@ -531,9 +537,9 @@ show_llm_api_provider_menu() {
         read -r -p "LLM-провайдер [$default_idx]: " num || { echo ""; exit 130; }
         num="$(printf '%s' "$num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -z "$num" ] && num=$default_idx
-        case "$num" in *[!0-9]*|'') write_warn "Нужно число от 1 до $count"; continue ;; esac
+        case "$num" in *[!0-9]*|'') write_warn "Нужно число от 1 до $count" >&2; continue ;; esac
         if [ "$num" -ge 1 ] && [ "$num" -le "$count" ]; then break; fi
-        write_warn "Нужно число от 1 до $count"
+        write_warn "Нужно число от 1 до $count" >&2
     done
     printf '%s' "${LLM_PROVIDER_KEYS[$((num-1))]}"
 }

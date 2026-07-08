@@ -309,7 +309,11 @@ install_dependencies() {
 }
 
 ensure_dependencies() {
-    local needed=(fastapi uvicorn pydantic_settings aiosqlite)
+    # pkg_resources (setuptools) is included because natasha → pymorphy2 imports
+    # it, and on Python ≥3.12 setuptools is no longer bundled with the
+    # interpreter. Without it an existing venv passes the other checks but Natasha
+    # crashes at startup with ModuleNotFoundError: pkg_resources.
+    local needed=(fastapi uvicorn pydantic_settings aiosqlite pkg_resources)
     for mod in "${needed[@]}"; do
         if ! test_import "$mod"; then
             install_dependencies

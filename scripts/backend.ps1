@@ -349,7 +349,11 @@ function Install-Dependencies {
 }
 
 function Ensure-Dependencies {
-    $Needed = @("fastapi", "uvicorn", "pydantic_settings", "aiosqlite")
+    # pkg_resources (setuptools) is included because natasha → pymorphy2 imports
+    # it, and on Python ≥3.12 setuptools is no longer bundled with the
+    # interpreter. Without it an existing venv passes the other checks but Natasha
+    # crashes at startup with ModuleNotFoundError: pkg_resources.
+    $Needed = @("fastapi", "uvicorn", "pydantic_settings", "aiosqlite", "pkg_resources")
     foreach ($Module in $Needed) {
         if (-not (Test-Import $Module)) {
             Install-Dependencies -WithDev:$Dev

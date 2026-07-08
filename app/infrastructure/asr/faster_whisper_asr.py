@@ -27,7 +27,7 @@ def _register_cuda_dll_directories() -> None:
     if os.name != "nt":
         return
     try:
-        import nvidia  # type: ignore[import-untyped]
+        import nvidia  # type: ignore[import-not-found]
     except ImportError:
         logger.warning(
             "CUDA runtime packages not installed; "

@@ -15,6 +15,12 @@ dependencies = [
     "pydantic>=2.8.0",
     "pydantic-settings>=2.4.0",
     "rich>=13.7.0",
+    # pymorphy2 (a transitive dep of natasha) imports pkg_resources, which ships
+    # with setuptools. Since Python 3.12 setuptools is no longer bundled with the
+    # interpreter, so on a fresh 3.13/3.14 venv (e.g. macOS via Homebrew) Natasha
+    # crashes at startup with ModuleNotFoundError: pkg_resources. Declare it
+    # explicitly to make the dependency real.
+    "setuptools>=69.0.0",
     "uvicorn[standard]>=0.30.0",
 ]
 

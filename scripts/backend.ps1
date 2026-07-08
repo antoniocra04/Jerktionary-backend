@@ -274,29 +274,45 @@ function Test-EnvEnabled {
 
 function Ensure-GpuSettings {
     $NvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+    $HasGpu = $false
     if ($NvidiaSmi) {
         & $NvidiaSmi *> $null
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "NVIDIA GPU detected"
+            $HasGpu = $true
         } else {
             Write-Warn "nvidia-smi is present but returned an error"
         }
     } else {
-        Write-Warn "nvidia-smi not found; CUDA startup may fail"
+        Write-Warn "nvidia-smi not found; Whisper will run on CPU"
     }
 
-    if ((Get-EnvValue "WHISPER_DEVICE" "cuda") -ne "cuda") {
-        Set-EnvValue "WHISPER_DEVICE" "cuda"
-        Write-Ok "WHISPER_DEVICE set to cuda"
+    if ($HasGpu) {
+        if ((Get-EnvValue "WHISPER_DEVICE" "cuda") -ne "cuda") {
+            Set-EnvValue "WHISPER_DEVICE" "cuda"
+            Write-Ok "WHISPER_DEVICE set to cuda"
+        } else {
+            Write-Ok "WHISPER_DEVICE=cuda"
+        }
+        if ((Get-EnvValue "WHISPER_COMPUTE_TYPE" "float16") -ne "float16") {
+            Set-EnvValue "WHISPER_COMPUTE_TYPE" "float16"
+            Write-Ok "WHISPER_COMPUTE_TYPE set to float16"
+        } else {
+            Write-Ok "WHISPER_COMPUTE_TYPE=float16"
+        }
     } else {
-        Write-Ok "WHISPER_DEVICE=cuda"
-    }
-
-    if ((Get-EnvValue "WHISPER_COMPUTE_TYPE" "float16") -ne "float16") {
-        Set-EnvValue "WHISPER_COMPUTE_TYPE" "float16"
-        Write-Ok "WHISPER_COMPUTE_TYPE set to float16"
-    } else {
-        Write-Ok "WHISPER_COMPUTE_TYPE=float16"
+        if ((Get-EnvValue "WHISPER_DEVICE" "cuda") -ne "cpu") {
+            Set-EnvValue "WHISPER_DEVICE" "cpu"
+            Write-Ok "WHISPER_DEVICE set to cpu"
+        } else {
+            Write-Ok "WHISPER_DEVICE=cpu"
+        }
+        if ((Get-EnvValue "WHISPER_COMPUTE_TYPE" "int8") -ne "int8") {
+            Set-EnvValue "WHISPER_COMPUTE_TYPE" "int8"
+            Write-Ok "WHISPER_COMPUTE_TYPE set to int8"
+        } else {
+            Write-Ok "WHISPER_COMPUTE_TYPE=int8"
+        }
     }
 }
 
@@ -364,9 +380,21 @@ function Install-CudaDeps {
         & $NvidiaSmi *> $null
         if ($LASTEXITCODE -ne 0) { return }
     }
+    if (Test-Import "nvidia") {
+        Write-Ok "CUDA runtime DLLs already available (nvidia package found)"
+        return
+    }
     Write-Step "installing CUDA runtime DLLs (cuBLAS + cudart)"
-    Invoke-Checked $Python @("-m", "pip", "install", "--upgrade", "--quiet", "-e", ".[cuda]")
-    Write-Ok "CUDA runtime DLLs installed"
+    try {
+        & $Python -m pip install --quiet -e ".[cuda]"
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "CUDA runtime DLLs installed"
+        } else {
+            Write-Warn "pip install .[cuda] returned exit code $LASTEXITCODE — GPU startup may fail"
+        }
+    } catch {
+        Write-Warn "Failed to install CUDA runtime: $_ — GPU startup may fail"
+    }
 }
 
 function Ensure-Dependencies {

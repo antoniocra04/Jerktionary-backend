@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-from app.core.config import Settings
+import os
+
+# huggingface_hub (used by faster-whisper to fetch model weights) disables its
+# tqdm progress bar by default in recent versions, so a multi-hundred-MB
+# download looks like a silent hang. Force it on before anything imports the hub.
+os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
+
+from app.core.config import Settings  # noqa: E402
 
 
 def main() -> int:
@@ -10,6 +17,7 @@ def main() -> int:
         f"{settings.whisper_model} on {settings.whisper_device}/{settings.whisper_compute_type}",
         flush=True,
     )
+    print("==> downloading weights on first run — this can take several minutes", flush=True)
 
     try:
         from faster_whisper import WhisperModel  # type: ignore[import-untyped]

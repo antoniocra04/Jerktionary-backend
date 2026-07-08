@@ -72,6 +72,11 @@ def main() -> int:
             "or set WHISPER_DEVICE=cpu in .env if you need a CPU fallback.",
             flush=True,
         )
+        print(
+            "ERROR On Windows with NVIDIA GPU, install CUDA runtime first: "
+            "pip install -e '.[cuda]'",
+            flush=True,
+        )
         return 1
 
     print("OK  Whisper model ready", flush=True)

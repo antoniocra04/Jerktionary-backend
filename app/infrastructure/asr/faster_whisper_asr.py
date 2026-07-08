@@ -6,6 +6,7 @@ from typing import Any
 
 import anyio
 import numpy as np
+from loguru import logger
 
 from app.core.config import Settings
 from app.domain.interfaces.asr import AsrStream
@@ -28,6 +29,11 @@ def _register_cuda_dll_directories() -> None:
     try:
         import nvidia  # type: ignore[import-untyped]
     except ImportError:
+        logger.warning(
+            "CUDA runtime packages not installed; "
+            "on Windows with NVIDIA GPU, install them first: "
+            "pip install -e \".[cuda]\""
+        )
         return
 
     bin_dirs: list[str] = []
@@ -39,6 +45,11 @@ def _register_cuda_dll_directories() -> None:
 
     if bin_dirs:
         os.environ["PATH"] = os.pathsep.join(bin_dirs) + os.pathsep + os.environ.get("PATH", "")
+    else:
+        logger.warning(
+            "CUDA wheels are installed but no DLL directories found; "
+            "the CUDA runtime may be incompatible or installed incorrectly"
+        )
 
 
 class FasterWhisperAsrProvider:

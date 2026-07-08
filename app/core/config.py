@@ -12,11 +12,11 @@ class Settings(BaseSettings):
 
     app_name: str = "Realtime Terms Backend"
     app_version: str = "0.1.0"
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"  # binds to all interfaces for LAN access
     port: int = 8000
     log_level: str = "INFO"
     cors_allow_origins: list[str] = Field(
-        default_factory=lambda: ["http://127.0.0.1:5173", "http://localhost:5173"]
+        default_factory=lambda: ["*"]
     )
 
     sqlite_path: Path = Field(default=Path("data/app.sqlite3"))

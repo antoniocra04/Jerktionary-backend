@@ -40,7 +40,7 @@ class OpenAiLlmProvider:
         prompt = build_explain_prompt(
             term=term, context=context, context_chars=self._settings.llm_context_chars
         )
-        raw = await self._complete(prompt)
+        raw = self._sanitize_content(await self._complete(prompt))
         try:
             parsed = LlmJsonResponse.model_validate_json(raw)
         except (json.JSONDecodeError, ValidationError) as exc:
@@ -67,7 +67,7 @@ class OpenAiLlmProvider:
                 yield fields
 
         try:
-            parsed = LlmJsonResponse.model_validate_json(accumulated)
+            parsed = LlmJsonResponse.model_validate_json(self._sanitize_content(accumulated))
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("External LLM returned invalid JSON") from exc
         final = {
@@ -106,7 +106,7 @@ class OpenAiLlmProvider:
                 yield fields
 
         try:
-            parsed = LlmAnswerResponse.model_validate_json(accumulated)
+            parsed = LlmAnswerResponse.model_validate_json(self._sanitize_content(accumulated))
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("External LLM returned invalid JSON") from exc
         final = {"answer": parsed.answer, "points": parsed.points, "example": parsed.example}
@@ -123,6 +123,18 @@ class OpenAiLlmProvider:
             "response_format": {"type": "json_object"},
         }
 
+    @staticmethod
+    def _sanitize_content(raw: str) -> str:
+        """Strip markdown code fences that some providers wrap JSON in."""
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            newline = cleaned.find("\n")
+            if newline != -1:
+                cleaned = cleaned[newline + 1 :]
+        if cleaned.endswith("```"):
+            cleaned = cleaned[: -3]
+        return cleaned.strip()
+
     @property
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_key}"}
@@ -137,7 +149,10 @@ class OpenAiLlmProvider:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return str(data["choices"][0]["message"]["content"])
+                content = data["choices"][0]["message"]["content"]
+                if content is None:
+                    raise LlmResponseError("External LLM returned null content")
+                return str(content)
         except (httpx.HTTPError, KeyError, IndexError) as exc:
             raise LlmResponseError(f"External LLM request failed: {exc}") from exc
 

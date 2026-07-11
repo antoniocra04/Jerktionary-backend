@@ -125,8 +125,18 @@ class OpenAiLlmProvider:
 
     @staticmethod
     def _sanitize_content(raw: str) -> str:
-        """Strip markdown code fences that some providers wrap JSON in."""
+        """Strip markdown code fences only when the raw content is not already
+        valid JSON (some providers wrap JSON in ``` fences, but removing
+        trailing ``` from valid JSON that happens to contain a code example
+        would corrupt it)."""
         cleaned = raw.strip()
+        if not cleaned:
+            return cleaned
+        try:
+            json.loads(cleaned)
+            return cleaned
+        except json.JSONDecodeError:
+            pass
         if cleaned.startswith("```"):
             newline = cleaned.find("\n")
             if newline != -1:

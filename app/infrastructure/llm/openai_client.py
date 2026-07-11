@@ -137,7 +137,19 @@ class OpenAiLlmProvider:
                 )
                 response.raise_for_status()
                 data = response.json()
-                return str(data["choices"][0]["message"]["content"])
+                raw = str(data["choices"][0]["message"]["content"])
+                try:
+                    json.loads(raw)
+                except json.JSONDecodeError:
+                    stripped = raw.strip()
+                    if stripped.startswith("```"):
+                        newline = stripped.find("\n")
+                        if newline != -1:
+                            stripped = stripped[newline + 1 :]
+                    if stripped.endswith("```"):
+                        stripped = stripped[: -3]
+                    return stripped.strip()
+                return raw
         except (httpx.HTTPError, KeyError, IndexError) as exc:
             raise LlmResponseError(f"External LLM request failed: {exc}") from exc
 

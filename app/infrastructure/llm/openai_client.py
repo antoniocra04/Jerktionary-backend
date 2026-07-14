@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 
 import httpx
@@ -20,6 +21,21 @@ from app.infrastructure.llm.prompts import (
     build_answer_prompt,
     build_explain_prompt,
 )
+
+
+def _extract_fenced_json(text: str) -> str:
+    """Try to extract JSON from a code-fenced DeepSeek response.
+
+    Handles:
+      ```json\\n...\\n```
+      ```\\n...\\n```
+      text before ``` fences ... ``` text after
+    """
+    stripped = text.strip()
+    m = re.search(r"```(?:json\b[^\n]*)?\s*\n?(.*?)\n?```", stripped, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    return stripped
 
 
 class OpenAiLlmProvider:
@@ -141,14 +157,8 @@ class OpenAiLlmProvider:
                 try:
                     json.loads(raw)
                 except json.JSONDecodeError:
-                    stripped = raw.strip()
-                    if stripped.startswith("```"):
-                        newline = stripped.find("\n")
-                        if newline != -1:
-                            stripped = stripped[newline + 1 :]
-                    if stripped.endswith("```"):
-                        stripped = stripped[: -3]
-                    return stripped.strip()
+                    stripped = _extract_fenced_json(raw)
+                    return stripped
                 return raw
         except (httpx.HTTPError, KeyError, IndexError) as exc:
             raise LlmResponseError(f"External LLM request failed: {exc}") from exc

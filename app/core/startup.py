@@ -11,6 +11,7 @@ from app.core.state import AppState, Readiness, ServiceStatus
 from app.domain.interfaces.llm import LlmProvider
 from app.infrastructure.asr.api_asr_provider import ApiAsrProvider
 from app.infrastructure.asr.faster_whisper_asr import FasterWhisperAsrProvider
+from app.infrastructure.asr.yandex_asr import YandexAsrProvider
 from app.infrastructure.db.repositories.explanation_repository import SQLiteExplanationRepository
 from app.infrastructure.db.sqlite import SQLiteDatabase
 from app.infrastructure.llm.anthropic_client import AnthropicLlmProvider
@@ -34,18 +35,30 @@ async def create_app_state(settings: Settings) -> AppState:
     resources.append(sqlite)
     repository = SQLiteExplanationRepository(sqlite)
 
-    # Whisper provider is chosen at backend startup. "local" loads faster-whisper
-    # on this box (multi-GB model, optional via WHISPER_ENABLED); "api" mounts the
-    # OpenAI-compatible /audio/transcriptions client with key/base_url from .env.
+    # ASR provider is chosen at backend startup. "local" loads faster-whisper on
+    # this box (multi-GB model, optional via WHISPER_ENABLED); "api" mounts the
+    # OpenAI-compatible /audio/transcriptions client with key/base_url from .env;
+    # "yandex" mounts SpeechKit v3 gRPC streaming (realtime partials/finals).
     asr_service: AsrService | None = None
     whisper_status = ServiceStatus(
         False, required=False, details="disabled (WHISPER_ENABLED=false)"
     )
     if settings.whisper_enabled:
-        if settings.whisper_provider.strip().lower() == "api":
+        asr_provider_key = settings.whisper_provider.strip().lower()
+        if asr_provider_key == "api":
             asr_service = AsrService(ApiAsrProvider(settings))
             model = settings.whisper_api_model.strip() or "whisper-1"
             whisper_status = ServiceStatus(True, details=f"api ({model})")
+        elif asr_provider_key == "yandex":
+            try:
+                yandex_provider = YandexAsrProvider(settings)
+                yandex_provider.load()
+            except Exception as exc:
+                logger.exception("Yandex SpeechKit startup failed")
+                await _close_resources(resources)
+                raise StartupError(f"Yandex SpeechKit failed to init: {exc}") from exc
+            asr_service = AsrService(yandex_provider)
+            whisper_status = ServiceStatus(True, details=f"yandex ({settings.yandex_stt_model})")
         else:
             try:
                 asr_provider = FasterWhisperAsrProvider(settings)

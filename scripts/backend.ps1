@@ -397,6 +397,18 @@ function Install-CudaDeps {
     }
 }
 
+function Ensure-YandexDeps {
+    # gRPC client + SpeechKit stubs are an optional extra (pyproject [yandex]) so
+    # users who never pick the Yandex provider don't pay for them.
+    if (Test-Import "yandex.cloud.ai.stt.v3.stt_service_pb2_grpc") {
+        Write-Ok "Yandex SpeechKit deps ready"
+        return
+    }
+    Write-Step "installing Yandex SpeechKit dependencies"
+    Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[yandex]")
+    Write-Ok "Yandex SpeechKit deps installed"
+}
+
 function Ensure-Dependencies {
     # pkg_resources (setuptools) is included because natasha → pymorphy2 imports
     # it, and on Python ≥3.12 setuptools is no longer bundled with the
@@ -757,16 +769,21 @@ function Select-Models {
         Write-Host "Whisper — как запускать:"
         Write-Host "  [1] Локально (faster-whisper)"
         Write-Host "  [2] Через API (ключ)"
-        $WhisperModeDefault = if ($CurrentWhisperProvider -eq "api") { 2 } else { 1 }
+        Write-Host "  [3] Yandex SpeechKit (реальное время)"
+        $WhisperModeDefault = switch ($CurrentWhisperProvider) {
+            "api" { 2 }
+            "yandex" { 3 }
+            default { 1 }
+        }
         while ($true) {
             $Input = Read-Host ("Режим Whisper [$WhisperModeDefault]")
             $Trimmed = "$Input".Trim()
             $WhisperModeNum = if (-not $Trimmed) { $WhisperModeDefault } else { 0 }
-            if (-not $Trimmed -or ($Trimmed -match '^[12]$')) {
+            if (-not $Trimmed -or ($Trimmed -match '^[123]$')) {
                 if ($Trimmed) { $WhisperModeNum = [int]$Trimmed }
                 break
             }
-            Write-Warn "Нужно 1 или 2"
+            Write-Warn "Нужно 1, 2 или 3"
         }
 
         if ($WhisperModeNum -eq 1) {
@@ -779,11 +796,17 @@ function Select-Models {
             } else {
                 Write-Ok "Whisper-модель без изменений: $CurrentWhisper"
             }
-        } else {
+        } elseif ($WhisperModeNum -eq 2) {
             Set-EnvValue "WHISPER_PROVIDER" "api"
             Write-Ok "WHISPER_PROVIDER=api"
             $Key = Read-SecretWithKeep -Prompt "Whisper API key" -Current (Get-EnvValue "WHISPER_API_KEY" "")
             Set-EnvValue "WHISPER_API_KEY" $Key
+        } else {
+            Set-EnvValue "WHISPER_PROVIDER" "yandex"
+            Write-Ok "WHISPER_PROVIDER=yandex"
+            $Key = Read-SecretWithKeep -Prompt "Yandex SpeechKit API key" -Current (Get-EnvValue "YANDEX_STT_API_KEY" "")
+            Set-EnvValue "YANDEX_STT_API_KEY" $Key
+            Ensure-YandexDeps
         }
     } else {
         Write-Warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"

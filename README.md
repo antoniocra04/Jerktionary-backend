@@ -141,6 +141,26 @@ ollama serve
   приложении провайдера: OpenAI, Anthropic (нативный Messages API), Gemini, Groq,
   OpenRouter, DeepSeek или любой OpenAI-совместимый base URL.
 
+## Yandex SpeechKit (распознавание в реальном времени)
+
+`WHISPER_PROVIDER=yandex` включает потоковое распознавание через SpeechKit v3
+(bidirectional gRPC): частичные и финальные гипотезы приходят по мере речи, без
+буферного пере-декодирования, как у Whisper-провайдеров. Выбирается в интерактивном
+лаунчере (`backend.cmd` / `./backend.sh`, пункт «Yandex SpeechKit») или вручную:
+
+```bash
+pip install -e ".[yandex]"
+```
+
+```env
+WHISPER_PROVIDER=yandex
+YANDEX_STT_API_KEY=<API-ключ сервисного аккаунта с ролью ai.speechkit-stt.user>
+```
+
+Язык берётся из `ASR_LANGUAGE` (например `ru` → `ru-RU`), модель — из
+`YANDEX_STT_MODEL` (по умолчанию `general`). При обрыве или истечении gRPC-сессии
+стрим переподключается автоматически, уже распознанный текст сохраняется.
+
 ## WebSocket
 
 `WS /ws/audio` принимает binary PCM chunks: 16 kHz, mono, int16 little-endian.

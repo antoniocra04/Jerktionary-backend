@@ -34,6 +34,13 @@ cuda = [
     "nvidia-cublas-cu12>=12.9; sys_platform == 'win32'",
     "nvidia-cuda-runtime-cu12>=12.9; sys_platform == 'win32'",
 ]
+# Yandex SpeechKit realtime streaming ASR (WHISPER_PROVIDER=yandex): gRPC client
+# plus the pre-generated v3 STT stubs shipped in the yandexcloud SDK.
+# Install with: pip install -e ".[yandex]"
+yandex = [
+    "grpcio>=1.60.0",
+    "yandexcloud>=0.300.0",
+]
 dev = [
     "black>=24.8.0",
     "mypy>=1.11.0",
@@ -62,6 +69,12 @@ warn_unused_ignores = true
 warn_return_any = true
 disallow_untyped_defs = true
 exclude = ["data/"]
+
+# Optional Yandex SpeechKit stack: grpcio has no bundled stubs and the yandexcloud
+# generated code is untyped, and neither is installed unless the [yandex] extra is.
+[[tool.mypy.overrides]]
+module = ["grpc", "grpc.*", "yandex.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

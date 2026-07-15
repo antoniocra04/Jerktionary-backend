@@ -9,9 +9,11 @@ from app.api.schemas.terms import TermItem
 
 class AsrChoice(BaseModel):
     """Per-connection ASR selection. ``local`` uses the on-box Whisper; ``api`` uses
-    an OpenAI-compatible /audio/transcriptions endpoint with the supplied key."""
+    an OpenAI-compatible /audio/transcriptions endpoint with the supplied key;
+    ``yandex`` is SpeechKit realtime streaming. Routing is actually fixed at backend
+    startup (WHISPER_PROVIDER) — this handshake is accepted for compatibility."""
 
-    provider: Literal["local", "api"] = "local"
+    provider: Literal["local", "api", "yandex"] = "local"
     api_key: str = Field(default="", max_length=400)
     model: str = Field(default="", max_length=200)
     base_url: str = Field(default="", max_length=400)

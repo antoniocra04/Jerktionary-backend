@@ -313,6 +313,18 @@ install_dependencies() {
     write_ok "dependencies installed"
 }
 
+ensure_yandex_deps() {
+    # gRPC client + SpeechKit stubs are an optional extra (pyproject [yandex]) so
+    # users who never pick the Yandex provider don't pay for them.
+    if test_import "yandex.cloud.ai.stt.v3.stt_service_pb2_grpc"; then
+        write_ok "Yandex SpeechKit deps ready"
+        return
+    fi
+    write_step "installing Yandex SpeechKit dependencies"
+    invoke_checked "$PYTHON" -m pip install -e ".[yandex]"
+    write_ok "Yandex SpeechKit deps installed"
+}
+
 ensure_dependencies() {
     # pkg_resources (setuptools) is included because natasha → pymorphy2 imports
     # it, and on Python ≥3.12 setuptools is no longer bundled with the
@@ -628,12 +640,17 @@ select_models() {
         echo "Whisper — как запускать:"
         echo "  [1] Локально (faster-whisper)"
         echo "  [2] Через API (ключ)"
-        if [ "$current_whisper_provider" = "api" ]; then whisper_mode_default=2; else whisper_mode_default=1; fi
+        echo "  [3] Yandex SpeechKit (реальное время)"
+        case "$current_whisper_provider" in
+            api) whisper_mode_default=2 ;;
+            yandex) whisper_mode_default=3 ;;
+            *) whisper_mode_default=1 ;;
+        esac
         while true; do
             read -r -p "Режим Whisper [$whisper_mode_default]: " whisper_mode_num || { echo ""; exit 130; }
             whisper_mode_num="$(printf '%s' "$whisper_mode_num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
             [ -z "$whisper_mode_num" ] && whisper_mode_num=$whisper_mode_default
-            case "$whisper_mode_num" in 1|2) break ;; *) write_warn "Нужно 1 или 2" ;; esac
+            case "$whisper_mode_num" in 1|2|3) break ;; *) write_warn "Нужно 1, 2 или 3" ;; esac
         done
 
         if [ "$whisper_mode_num" -eq 1 ]; then
@@ -648,12 +665,19 @@ select_models() {
             else
                 write_ok "Whisper-модель без изменений: $current_whisper"
             fi
-        else
+        elif [ "$whisper_mode_num" -eq 2 ]; then
             set_env_value "WHISPER_PROVIDER" "api"
             write_ok "WHISPER_PROVIDER=api"
             local wkey
             wkey="$(read_secret_with_keep "$(get_env_value "WHISPER_API_KEY" "")" "Whisper API key")"
             set_env_value "WHISPER_API_KEY" "$wkey"
+        else
+            set_env_value "WHISPER_PROVIDER" "yandex"
+            write_ok "WHISPER_PROVIDER=yandex"
+            local ykey
+            ykey="$(read_secret_with_keep "$(get_env_value "YANDEX_STT_API_KEY" "")" "Yandex SpeechKit API key")"
+            set_env_value "YANDEX_STT_API_KEY" "$ykey"
+            ensure_yandex_deps
         fi
     else
         write_warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"

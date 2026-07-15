@@ -84,13 +84,25 @@ class Settings(BaseSettings):
     llm_api_model: str = ""
     llm_api_base_url: str = ""
 
-    # Whisper provider chosen at startup: "local" (faster-whisper on this box) or
-    # "api" (OpenAI-compatible /audio/transcriptions). The api fields mirror the
-    # LLM ones — empty means "use the OpenAI Whisper default".
+    # Whisper provider chosen at startup: "local" (faster-whisper on this box),
+    # "api" (OpenAI-compatible /audio/transcriptions) or "yandex" (SpeechKit v3
+    # gRPC streaming). The api fields mirror the LLM ones — empty means "use the
+    # OpenAI Whisper default".
     whisper_provider: str = "local"
     whisper_api_key: str = ""
     whisper_api_model: str = ""
     whisper_api_base_url: str = ""
+
+    # Yandex SpeechKit realtime recognition (WHISPER_PROVIDER=yandex): v3 gRPC
+    # streaming — true partial/final events as you speak, instead of Whisper's
+    # buffer re-decoding. Needs the optional deps (pip install -e ".[yandex]") and
+    # a service-account API key with the ai.speechkit-stt.user role.
+    yandex_stt_api_key: str = ""
+    yandex_stt_model: str = "general"
+    yandex_stt_endpoint: str = "stt.api.cloud.yandex.net:443"
+    # Partial hypotheses arrive many times a second; rate-limit the updates sent to
+    # the client. Committed (final) text always emits immediately.
+    yandex_stt_emit_interval_seconds: float = 0.3
 
     term_min_chars: int = 3
     term_max_words: int = 5

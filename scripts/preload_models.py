@@ -52,6 +52,12 @@ def _prefetch_weights(model_name: str) -> None:
 
 def main() -> int:
     settings = Settings()
+    provider = settings.whisper_provider.strip().lower()
+    if not settings.whisper_enabled or provider != "local":
+        # API/Yandex transcription (or disabled ASR) needs no multi-GB local model.
+        reason = "WHISPER_ENABLED=false" if not settings.whisper_enabled else f"provider={provider}"
+        print(f"==> skipping local Whisper preload ({reason})", flush=True)
+        return 0
     print(
         "==> checking Whisper model "
         f"{settings.whisper_model} on {settings.whisper_device}/{settings.whisper_compute_type}",

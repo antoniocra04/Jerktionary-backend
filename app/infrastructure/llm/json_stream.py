@@ -2,9 +2,55 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, TypeVar
 
-from pydantic import BaseModel, field_validator
+from loguru import logger
+from pydantic import BaseModel, ValidationError, field_validator
+
+TModel = TypeVar("TModel", bound=BaseModel)
+
+# Reasoning models emit <think>…</think> before the answer (tolerate an unclosed
+# tag: max_tokens can cut the stream mid-thought).
+_THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL)
+_FENCE_RE = re.compile(r"```[a-zA-Z]*\s*(.*?)\s*```", re.DOTALL)
+
+
+def sanitize_llm_json(raw: str) -> str:
+    """Cut the JSON object out of a raw completion.
+
+    Providers that ignore (or don't support) ``response_format=json_object`` wrap
+    the object in markdown fences, ``<think>`` blocks, or explanatory prose.
+    Returns the outermost ``{...}`` slice; falls back to the cleaned text when no
+    braces are present.
+    """
+    text = _THINK_RE.sub("", raw).strip()
+    fence = _FENCE_RE.search(text)
+    if fence:
+        text = fence.group(1).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def parse_llm_json(raw: str, model_cls: type[TModel]) -> TModel:
+    """Parse a completion into ``model_cls``, tolerating decoration around the JSON.
+
+    Tries the text as-is first (the common case), then the sanitized slice. Logs
+    the payload before giving up so failures are diagnosable from the backend log;
+    callers translate the raised error into their provider-specific
+    ``LlmResponseError``.
+    """
+    try:
+        return model_cls.model_validate_json(raw)
+    except (json.JSONDecodeError, ValidationError):
+        pass
+    try:
+        return model_cls.model_validate_json(sanitize_llm_json(raw))
+    except (json.JSONDecodeError, ValidationError):
+        logger.warning("Unparseable LLM response ({} chars): {!r}", len(raw), raw[:400])
+        raise
 
 
 def _coerce_to_str(value: Any) -> str:

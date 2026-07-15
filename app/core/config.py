@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     yandex_stt_api_key: str = ""
     yandex_stt_model: str = "general"
     yandex_stt_endpoint: str = "stt.api.cloud.yandex.net:443"
+    # Punctuation and literary formatting of the normalized (committed) text —
+    # SpeechKit's literature_text flag. Live partials are always unpunctuated;
+    # punctuation appears when the utterance is finalized.
+    yandex_stt_punctuation: bool = True
     # Partial hypotheses arrive many times a second; rate-limit the updates sent to
     # the client. Committed (final) text always emits immediately.
     yandex_stt_emit_interval_seconds: float = 0.3

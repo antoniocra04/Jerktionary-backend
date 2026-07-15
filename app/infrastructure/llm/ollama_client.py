@@ -15,6 +15,7 @@ from app.infrastructure.llm.json_stream import (
     LlmAnswerResponse,
     LlmJsonResponse,
     extract_partial_fields,
+    parse_llm_json,
 )
 from app.infrastructure.llm.prompts import (
     ANSWER_KEYS,
@@ -153,7 +154,7 @@ class OllamaLlmProvider:
                         self._log_timings(chunk)
 
         try:
-            parsed = LlmAnswerResponse.model_validate_json(accumulated)
+            parsed = parse_llm_json(accumulated, LlmAnswerResponse)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("Local LLM returned invalid JSON") from exc
         final = {"answer": parsed.answer, "points": parsed.points, "example": parsed.example}
@@ -199,7 +200,7 @@ class OllamaLlmProvider:
 
     @staticmethod
     def _parse_response(raw: str) -> LlmJsonResponse:
-        return LlmJsonResponse.model_validate_json(raw)
+        return parse_llm_json(raw, LlmJsonResponse)
 
     @staticmethod
     def _duration_ms(value: object) -> float:

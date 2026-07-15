@@ -13,6 +13,7 @@ from app.infrastructure.llm.json_stream import (
     LlmAnswerResponse,
     LlmJsonResponse,
     extract_partial_fields,
+    parse_llm_json,
 )
 from app.infrastructure.llm.prompts import (
     ANSWER_KEYS,
@@ -42,7 +43,7 @@ class OpenAiLlmProvider:
         )
         raw = await self._complete(prompt)
         try:
-            parsed = LlmJsonResponse.model_validate_json(raw)
+            parsed = parse_llm_json(raw, LlmJsonResponse)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("External LLM returned invalid JSON") from exc
         return Explanation(
@@ -67,7 +68,7 @@ class OpenAiLlmProvider:
                 yield fields
 
         try:
-            parsed = LlmJsonResponse.model_validate_json(accumulated)
+            parsed = parse_llm_json(accumulated, LlmJsonResponse)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("External LLM returned invalid JSON") from exc
         final = {
@@ -106,7 +107,7 @@ class OpenAiLlmProvider:
                 yield fields
 
         try:
-            parsed = LlmAnswerResponse.model_validate_json(accumulated)
+            parsed = parse_llm_json(accumulated, LlmAnswerResponse)
         except (json.JSONDecodeError, ValidationError) as exc:
             raise LlmResponseError("External LLM returned invalid JSON") from exc
         final = {"answer": parsed.answer, "points": parsed.points, "example": parsed.example}

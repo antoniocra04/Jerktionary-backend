@@ -227,9 +227,11 @@ class YandexStreamingAsrStream:
                 )
             ),
             # Normalized (refined) finals are what gets committed permanently;
-            # see StreamingTranscript.
+            # see StreamingTranscript. literature_text adds punctuation and
+            # capitalization to that normalized text.
             "text_normalization": pb.TextNormalizationOptions(
                 text_normalization=pb.TextNormalizationOptions.TEXT_NORMALIZATION_ENABLED,
+                literature_text=self._settings.yandex_stt_punctuation,
                 profanity_filter=False,
             ),
             "audio_processing_type": pb.RecognitionModelOptions.REAL_TIME,

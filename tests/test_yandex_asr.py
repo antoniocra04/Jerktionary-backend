@@ -75,6 +75,30 @@ def _make_stream() -> YandexStreamingAsrStream:
     return YandexStreamingAsrStream(settings, modules=None)  # type: ignore[arg-type]
 
 
+def test_session_options_enable_punctuation() -> None:
+    # Needs the optional [yandex] extra; the assembler/emit tests above run without it.
+    pytest.importorskip("yandex.cloud.ai.stt.v3")
+    from app.infrastructure.asr.yandex_asr import _import_speechkit
+
+    modules = _import_speechkit()
+    settings = Settings(_env_file=None, yandex_stt_api_key="k")
+    stream = YandexStreamingAsrStream(settings, modules)
+    options = stream._session_options()
+
+    model = options.recognition_model
+    assert model.text_normalization.literature_text is True
+    assert model.audio_format.raw_audio.sample_rate_hertz == settings.audio_sample_rate
+    assert list(model.language_restriction.language_code) == ["ru-RU"]
+
+    disabled = Settings(_env_file=None, yandex_stt_api_key="k", yandex_stt_punctuation=False)
+    assert (
+        YandexStreamingAsrStream(disabled, modules)
+        ._session_options()
+        .recognition_model.text_normalization.literature_text
+        is False
+    )
+
+
 def test_emit_throttles_partials_but_not_commits(monkeypatch: pytest.MonkeyPatch) -> None:
     stream = _make_stream()
     clock = {"now": 100.0}

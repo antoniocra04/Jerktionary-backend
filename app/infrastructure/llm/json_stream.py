@@ -15,6 +15,15 @@ _THINK_RE = re.compile(r"<think>.*?(?:</think>|\Z)", re.DOTALL)
 _FENCE_RE = re.compile(r"```[a-zA-Z]*\s*(.*?)\s*```", re.DOTALL)
 
 
+def _strip_decorations(raw: str) -> str:
+    """Drop non-JSON decoration: ``<think>`` blocks and markdown fences."""
+    text = _THINK_RE.sub("", raw).strip()
+    fence = _FENCE_RE.search(text)
+    if fence:
+        text = fence.group(1).strip()
+    return text
+
+
 def sanitize_llm_json(raw: str) -> str:
     """Cut the JSON object out of a raw completion.
 
@@ -23,10 +32,7 @@ def sanitize_llm_json(raw: str) -> str:
     Returns the outermost ``{...}`` slice; falls back to the cleaned text when no
     braces are present.
     """
-    text = _THINK_RE.sub("", raw).strip()
-    fence = _FENCE_RE.search(text)
-    if fence:
-        text = fence.group(1).strip()
+    text = _strip_decorations(raw)
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end > start:
@@ -35,22 +41,37 @@ def sanitize_llm_json(raw: str) -> str:
 
 
 def parse_llm_json(raw: str, model_cls: type[TModel]) -> TModel:
-    """Parse a completion into ``model_cls``, tolerating decoration around the JSON.
+    """Parse a completion into ``model_cls``, tolerating real-world LLM output.
 
-    Tries the text as-is first (the common case), then the sanitized slice. Logs
-    the payload before giving up so failures are diagnosable from the backend log;
-    callers translate the raised error into their provider-specific
-    ``LlmResponseError``.
+    Tries progressively harder: the text as-is; the sanitized ``{...}`` slice;
+    a lenient decode that allows literal newlines inside strings (models emit
+    those in multi-line fields like ``points`` even though RFC JSON forbids
+    them); finally salvages whatever fields already arrived when the response
+    was truncated at the token limit — a shortened result beats a 502 mid-
+    conversation. Logs the payload before giving up; callers translate the
+    raised error into their provider-specific ``LlmResponseError``.
     """
     try:
         return model_cls.model_validate_json(raw)
     except (json.JSONDecodeError, ValidationError):
         pass
+    sanitized = sanitize_llm_json(raw)
     try:
-        return model_cls.model_validate_json(sanitize_llm_json(raw))
+        return model_cls.model_validate(json.loads(sanitized, strict=False))
     except (json.JSONDecodeError, ValidationError):
-        logger.warning("Unparseable LLM response ({} chars): {!r}", len(raw), raw[:400])
-        raise
+        pass
+    stripped = _strip_decorations(raw)
+    fields = extract_partial_fields(stripped, tuple(model_cls.model_fields))
+    if any(value.strip() for value in fields.values()):
+        logger.warning(
+            "LLM response is not valid JSON (likely truncated at the token limit); "
+            "salvaged fields {} from {} chars",
+            sorted(fields),
+            len(raw),
+        )
+        return model_cls.model_validate(dict.fromkeys(model_cls.model_fields, "") | fields)
+    logger.warning("Unparseable LLM response ({} chars): {!r}", len(raw), raw[:400])
+    return model_cls.model_validate_json(sanitized)
 
 
 def _coerce_to_str(value: Any) -> str:

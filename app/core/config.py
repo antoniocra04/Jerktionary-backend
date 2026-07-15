@@ -60,7 +60,10 @@ class Settings(BaseSettings):
     # .env (falling back to this default), so a mismatch leaves LLM disabled.
     ollama_model: str = "qwen3:8b"
     llm_temperature: float = 0.2
-    llm_max_tokens: int = 512
+    # Answer/explanation JSON in Russian easily exceeds 512 tokens, and reasoning
+    # models spend part of the budget on thinking — a low cap truncates the JSON
+    # mid-string and the response fails to parse.
+    llm_max_tokens: int = 2048
     llm_timeout_seconds: float = 30.0
     # Defaults for the external (API-key) LLM provider when the request doesn't
     # specify its own model/base URL. OpenAI-compatible chat completions endpoint.

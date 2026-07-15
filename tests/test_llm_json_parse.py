@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from app.infrastructure.llm.json_stream import LlmJsonResponse, parse_llm_json, sanitize_llm_json
+from app.infrastructure.llm.json_stream import (
+    LlmAnswerResponse,
+    LlmJsonResponse,
+    parse_llm_json,
+    sanitize_llm_json,
+)
 
 _PAYLOAD = '{"title": "Стек", "short": "LIFO-структура", "example": "", "why_important": ""}'
 
@@ -41,3 +46,28 @@ def test_garbage_still_raises() -> None:
 def test_sanitize_keeps_outermost_object() -> None:
     raw = 'ответ: {"a": {"b": 1}} конец'
     assert sanitize_llm_json(raw) == '{"a": {"b": 1}}'
+
+
+def test_literal_newlines_inside_strings_parse() -> None:
+    # Models emit real newlines in multi-line fields (points) even though RFC JSON
+    # forbids control characters inside strings — the lenient pass must accept them.
+    raw = (
+        '{\n  "answer": "Ну, по сути это тренировка сети.",\n'
+        '  "points": "- Сначала берём архитектуру.\n- Потом настраиваем слои.",\n'
+        '  "example": "Например, CNN для картинок."\n}'
+    )
+    parsed = parse_llm_json(raw, LlmAnswerResponse)
+    assert parsed.points == "- Сначала берём архитектуру.\n- Потом настраиваем слои."
+
+
+def test_truncated_json_salvages_arrived_fields() -> None:
+    # Cut mid-string at the token limit (as in real logs): no closing brace at all.
+    raw = (
+        '{\n  "title": "Репликация",\n'
+        '  "short": "Копирование данных на несколько узлов, чтобы читать с реплик и не терять'
+    )
+    parsed = parse_llm_json(raw, LlmJsonResponse)
+    assert parsed.title == "Репликация"
+    assert parsed.short.startswith("Копирование данных")
+    assert parsed.example == ""
+    assert parsed.why_important == ""

@@ -9,28 +9,7 @@ from loguru import logger
 from app.core.config import Settings
 from app.core.errors import AsrApiError
 from app.domain.interfaces.asr import AsrResult, AsrStream
-
-# asr_language holds a bare Whisper code ("ru"); SpeechKit wants a BCP-47 tag.
-# Codes not listed here fall back to SpeechKit's auto language detection.
-_LANGUAGE_TAGS = {
-    "ru": "ru-RU",
-    "en": "en-US",
-    "kk": "kk-KZ",
-    "uz": "uz-UZ",
-    "de": "de-DE",
-    "fr": "fr-FR",
-    "tr": "tr-TR",
-    "he": "he-IL",
-}
-
-
-def _language_tag(code: str) -> str:
-    code = code.strip()
-    if not code or code.lower() == "auto":
-        return "auto"
-    if "-" in code:
-        return code
-    return _LANGUAGE_TAGS.get(code.lower(), "auto")
+from app.infrastructure.asr.lang_tags import language_tag as _language_tag
 
 
 class _SpeechKitModules(NamedTuple):
@@ -52,6 +31,13 @@ def _import_speechkit() -> _SpeechKitModules:
         raise RuntimeError(
             "Yandex SpeechKit support requires the optional dependencies; "
             'install them with: pip install -e ".[yandex]"'
+        ) from exc
+    except Exception as exc:
+        # E.g. protobuf gencode/runtime VersionError: the NeMo extra pins an older
+        # protobuf than the yandexcloud stubs were generated with.
+        raise RuntimeError(
+            f"Yandex SpeechKit dependencies are broken ({exc}); "
+            'reinstall them with: pip install -U "protobuf>=6.31" -e ".[yandex]"'
         ) from exc
     return _SpeechKitModules(grpc, stt_pb2, stt_service_pb2_grpc)
 

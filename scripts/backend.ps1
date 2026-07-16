@@ -29,7 +29,8 @@ $WhisperModels = @(
     @{ name = "medium";         label = "medium";         size = "~1.5 GB"; note = "" },
     @{ name = "small";          label = "small";          size = "~480 MB"; note = "" },
     @{ name = "base";           label = "base";           size = "~145 MB"; note = "" },
-    @{ name = "tiny";           label = "tiny";           size = "~75 MB";  note = "Самая быстрая" }
+    @{ name = "tiny";           label = "tiny";           size = "~75 MB";  note = "Самая быстрая" },
+    @{ name = "nemotron-3.5-asr-streaming-0.6b"; label = "Nemotron 3.5 ASR Streaming 0.6B"; size = "~2.5 GB"; note = "Реальное время (NVIDIA NeMo): стриминг, пунктуация; ставит доп. зависимости" }
 )
 
 # LLM provider catalog — API providers only (mirrors app/core/providers.py
@@ -407,6 +408,30 @@ function Ensure-YandexDeps {
     Write-Step "installing Yandex SpeechKit dependencies"
     Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[yandex]")
     Write-Ok "Yandex SpeechKit deps installed"
+}
+
+function Ensure-NemotronDeps {
+    # NeMo toolkit is an optional extra (pyproject [nemotron]) — multi-GB, so only
+    # installed when the Nemotron streaming model is actually selected.
+    if (Test-Import "nemo.collections.asr") {
+        Write-Ok "Nemotron (NeMo) deps ready"
+        return
+    }
+    # A bare `pip install torch` on Windows gives the CPU-only build; when the
+    # backend is configured for CUDA, install the CUDA wheel explicitly first so
+    # NeMo's dependency resolution keeps it.
+    if ((Get-EnvValue "WHISPER_DEVICE" "cuda") -eq "cuda") {
+        Write-Step "installing CUDA build of PyTorch"
+        Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "torch", "--index-url", "https://download.pytorch.org/whl/cu126")
+    }
+    Write-Step "installing NeMo toolkit (this can take several minutes)"
+    Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[nemotron]")
+    # NeMo pins protobuf ~=5.29 but runs fine on 6.x, while the yandexcloud stubs
+    # REQUIRE >=6.31 — restore the newer runtime so both providers keep working.
+    if (Test-Import "yandexcloud") {
+        Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "protobuf>=6.31,<7")
+    }
+    Write-Ok "Nemotron (NeMo) deps installed"
 }
 
 function Ensure-Dependencies {
@@ -789,12 +814,15 @@ function Select-Models {
         if ($WhisperModeNum -eq 1) {
             Set-EnvValue "WHISPER_PROVIDER" "local"
             $CurrentWhisper = Get-EnvValue "WHISPER_MODEL" ""
-            $Choice = Show-ModelMenu -Title "Выбор Whisper-модели (faster-whisper)" -Options $WhisperModels -CurrentValue $CurrentWhisper
+            $Choice = Show-ModelMenu -Title "Выбор локальной модели распознавания" -Options $WhisperModels -CurrentValue $CurrentWhisper
             if ($Choice -and $Choice.Trim().ToLowerInvariant() -ne $CurrentWhisper.Trim().ToLowerInvariant()) {
                 Set-EnvValue "WHISPER_MODEL" $Choice
                 Write-Ok "WHISPER_MODEL=$Choice"
             } else {
-                Write-Ok "Whisper-модель без изменений: $CurrentWhisper"
+                Write-Ok "Модель распознавания без изменений: $CurrentWhisper"
+            }
+            if ((Get-EnvValue "WHISPER_MODEL" "").Trim().ToLowerInvariant().StartsWith("nemotron")) {
+                Ensure-NemotronDeps
             }
         } elseif ($WhisperModeNum -eq 2) {
             Set-EnvValue "WHISPER_PROVIDER" "api"

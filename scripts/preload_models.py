@@ -50,6 +50,26 @@ def _prefetch_weights(model_name: str) -> None:
         pass
 
 
+def _preload_nemotron(model_name: str) -> int:
+    """Pre-download the NVIDIA NeMo checkpoint (~2.5 GB) with a visible progress
+    bar. Loading/validating the model happens at backend startup — importing the
+    NeMo stack here would double the multi-second import cost."""
+    print(f"==> checking Nemotron model {model_name}", flush=True)
+    try:
+        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+    except ImportError:
+        print("WARN huggingface_hub is not installed; NeMo will download at startup", flush=True)
+        return 0
+    print("==> downloading weights on first run — this can take several minutes", flush=True)
+    try:
+        snapshot_download(f"nvidia/{model_name}")
+    except Exception as exc:
+        print(f"WARN prefetch failed ({exc}); NeMo will download at startup", flush=True)
+        return 0
+    print("OK  Nemotron model ready", flush=True)
+    return 0
+
+
 def main() -> int:
     settings = Settings()
     provider = settings.whisper_provider.strip().lower()
@@ -58,6 +78,8 @@ def main() -> int:
         reason = "WHISPER_ENABLED=false" if not settings.whisper_enabled else f"provider={provider}"
         print(f"==> skipping local Whisper preload ({reason})", flush=True)
         return 0
+    if settings.whisper_model.strip().lower().startswith("nemotron"):
+        return _preload_nemotron(settings.whisper_model.strip().lower())
     print(
         "==> checking Whisper model "
         f"{settings.whisper_model} on {settings.whisper_device}/{settings.whisper_compute_type}",

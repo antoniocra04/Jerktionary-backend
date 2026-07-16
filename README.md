@@ -141,6 +141,21 @@ ollama serve
   приложении провайдера: OpenAI, Anthropic (нативный Messages API), Gemini, Groq,
   OpenRouter, DeepSeek или любой OpenAI-совместимый base URL.
 
+## Nemotron ASR (локальный стриминг, Windows/CUDA)
+
+`WHISPER_PROVIDER=local` + `WHISPER_MODEL=nemotron-3.5-asr-streaming-0.6b` включает
+локальное потоковое распознавание через NVIDIA NeMo (cache-aware streaming,
+мультиязычная модель на 40 локалей, включая русский, с нативной пунктуацией).
+В отличие от Whisper буфер не пере-декодируется: каждый чанк проходит энкодер один
+раз с кэшированным контекстом. Выбирается в Windows-лаунчере (`backend.cmd`,
+локальный режим → пункт Nemotron), зависимости ставятся автоматически, или вручную:
+
+```bash
+# на Windows с NVIDIA GPU сначала CUDA-сборка torch, иначе приедет CPU-версия
+pip install torch --index-url https://download.pytorch.org/whl/cu126
+pip install -e ".[nemotron]"
+```
+
 ## Yandex SpeechKit (распознавание в реальном времени)
 
 `WHISPER_PROVIDER=yandex` включает потоковое распознавание через SpeechKit v3

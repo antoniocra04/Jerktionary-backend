@@ -11,6 +11,7 @@ from app.core.state import AppState, Readiness, ServiceStatus
 from app.domain.interfaces.llm import LlmProvider
 from app.infrastructure.asr.api_asr_provider import ApiAsrProvider
 from app.infrastructure.asr.faster_whisper_asr import FasterWhisperAsrProvider
+from app.infrastructure.asr.nemotron_asr import NemotronAsrProvider
 from app.infrastructure.asr.yandex_asr import YandexAsrProvider
 from app.infrastructure.db.repositories.explanation_repository import SQLiteExplanationRepository
 from app.infrastructure.db.sqlite import SQLiteDatabase
@@ -59,6 +60,18 @@ async def create_app_state(settings: Settings) -> AppState:
                 raise StartupError(f"Yandex SpeechKit failed to init: {exc}") from exc
             asr_service = AsrService(yandex_provider)
             whisper_status = ServiceStatus(True, details=f"yandex ({settings.yandex_stt_model})")
+        elif settings.whisper_model.strip().lower().startswith("nemotron"):
+            # Local NVIDIA streaming model (NeMo) picked in the local-model menu:
+            # same "local" provider key, different runtime than faster-whisper.
+            try:
+                nemotron_provider = NemotronAsrProvider(settings)
+                await nemotron_provider.load()
+            except Exception as exc:
+                logger.exception("Nemotron ASR startup failed")
+                await _close_resources(resources)
+                raise StartupError(f"Nemotron ASR failed to load: {exc}") from exc
+            asr_service = AsrService(nemotron_provider)
+            whisper_status = ServiceStatus(True, details=f"{settings.whisper_model} (streaming)")
         else:
             try:
                 asr_provider = FasterWhisperAsrProvider(settings)

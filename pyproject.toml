@@ -41,6 +41,13 @@ yandex = [
     "grpcio>=1.60.0",
     "yandexcloud>=0.300.0",
 ]
+# NVIDIA Nemotron cache-aware streaming ASR (local realtime recognition;
+# WHISPER_MODEL=nemotron-*). Install with: pip install -e ".[nemotron]"
+# On Windows with an NVIDIA GPU install the CUDA torch wheel first, otherwise a
+# CPU-only torch gets pulled in: pip install torch --index-url https://download.pytorch.org/whl/cu126
+nemotron = [
+    "nemo_toolkit[asr]>=2.6.2",
+]
 dev = [
     "black>=24.8.0",
     "mypy>=1.11.0",
@@ -73,7 +80,7 @@ exclude = ["data/"]
 # Optional Yandex SpeechKit stack: grpcio has no bundled stubs and the yandexcloud
 # generated code is untyped, and neither is installed unless the [yandex] extra is.
 [[tool.mypy.overrides]]
-module = ["grpc", "grpc.*", "yandex.*"]
+module = ["grpc", "grpc.*", "yandex.*", "nemo.*", "torch", "torch.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

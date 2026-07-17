@@ -1,71 +1,22 @@
 from __future__ import annotations
 
-import os
-
-# huggingface_hub (used by faster-whisper to fetch model weights) disables its
-# tqdm progress bar by default in recent versions, so a multi-hundred-MB
-# download looks like a silent hang. FORCE it on (a plain assignment, not
-# setdefault — the env var may already be set to "1" by the hub or the shell,
-# and setdefault wouldn't override that). Must run before the hub is imported.
-os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "0"
+import sys
 
 from app.core.config import Settings  # noqa: E402
-
-# faster-whisper's model id → Hugging Face repo. large-v3-turbo is a special-case
-# alias; everything else maps to the Systran/faster-whisper-<name> repo. We use
-# this to pre-download weights with an explicit progress bar.
-_WHISPER_REPO = {
-    "large-v3-turbo": "Systran/faster-whisper-large-v3-turbo",
-    "large-v3": "Systran/faster-whisper-large-v3",
-    "large-v2": "Systran/faster-whisper-large-v2",
-    "medium": "Systran/faster-whisper-medium",
-    "small": "Systran/faster-whisper-small",
-    "base": "Systran/faster-whisper-base",
-    "tiny": "Systran/faster-whisper-tiny",
-}
-
-
-def _prefetch_weights(model_name: str) -> None:
-    """Pre-download the model weights with a visible progress bar.
-
-    faster-whisper's WhisperModel() downloads weights lazily via huggingface_hub,
-    whose tqdm bar is unreliable in subprocess contexts (silent on macOS). Calling
-    snapshot_download() first — with progress bars forced on — makes the download
-    visible. If the repo id is unknown or the hub isn't installed, we silently
-    fall back to faster-whisper's own (possibly silent) download.
-    """
-    repo = _WHISPER_REPO.get(model_name)
-    if repo is None:
-        return
-    try:
-        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
-    except ImportError:
-        return
-    # allow_patterns limits the fetch to the model files (skip README, etc.).
-    # If the repo is unavailable (404, network error, etc.), silently continue —
-    # faster-whisper's WhisperModel() will download weights on its own.
-    try:
-        snapshot_download(repo, allow_patterns=["*.bin", "*.json", "*.txt", "*.model"])
-    except Exception:
-        pass
+from app.infrastructure.asr.hf_download import (  # noqa: E402
+    prefetch_nemotron_weights,
+    prefetch_whisper_weights,
+)
 
 
 def _preload_nemotron(model_name: str) -> int:
-    """Pre-download the NVIDIA NeMo checkpoint (~2.5 GB) with a visible progress
+    """Pre-download the NVIDIA NeMo checkpoint (~2.4 GB) with a visible progress
     bar. Loading/validating the model happens at backend startup — importing the
     NeMo stack here would double the multi-second import cost."""
-    print(f"==> checking Nemotron model {model_name}", flush=True)
-    try:
-        from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
-    except ImportError:
-        print("WARN huggingface_hub is not installed; NeMo will download at startup", flush=True)
-        return 0
+    model_id = f"nvidia/{model_name}"
+    print(f"==> checking Nemotron model {model_id}", flush=True)
     print("==> downloading weights on first run — this can take several minutes", flush=True)
-    try:
-        snapshot_download(f"nvidia/{model_name}")
-    except Exception as exc:
-        print(f"WARN prefetch failed ({exc}); NeMo will download at startup", flush=True)
-        return 0
+    prefetch_nemotron_weights(model_id)
     print("OK  Nemotron model ready", flush=True)
     return 0
 
@@ -87,7 +38,9 @@ def main() -> int:
     )
     print("==> downloading weights on first run — this can take several minutes", flush=True)
 
-    _prefetch_weights(settings.whisper_model)
+    # Pre-fetch weights with a visible progress bar (faster-whisper's own bar is
+    # hard-disabled, so this is the only place the download is observable).
+    prefetch_whisper_weights(settings.whisper_model)
 
     try:
         from faster_whisper import WhisperModel  # type: ignore[import-untyped]
@@ -117,4 +70,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

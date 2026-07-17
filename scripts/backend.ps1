@@ -6,7 +6,7 @@
     [switch]$SkipOllamaInstall,
     [switch]$SkipModelSelect,
     [switch]$SkipProviderSelect,
-    [string]$HostAddress = "127.0.0.1",
+    [string]$HostAddress = "0.0.0.0",
     [int]$Port = 8000
 )
 
@@ -363,10 +363,13 @@ function Install-Dependencies {
     Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "setuptools<81")
 
     Write-Step "installing backend dependencies"
+    # No --quiet: faster-whisper/numpy/natasha pull large wheels, and a silent
+    # multi-minute install looks like a hang. pip's own progress is the clearest
+    # signal that something is actually downloading (parity with backend.sh).
     if ($WithDev) {
-        Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[dev]")
+        Invoke-Checked $Python @("-m", "pip", "install", "-e", ".[dev]")
     } else {
-        Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".")
+        Invoke-Checked $Python @("-m", "pip", "install", "-e", ".")
     }
 
     Write-Ok "dependencies installed"
@@ -387,7 +390,8 @@ function Install-CudaDeps {
     }
     Write-Step "installing CUDA runtime DLLs (cuBLAS + cudart)"
     try {
-        & $Python -m pip install --quiet -e ".[cuda]"
+        # No --quiet: these are multi-hundred-MB wheels; show download progress.
+        & $Python -m pip install -e ".[cuda]"
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "CUDA runtime DLLs installed"
         } else {
@@ -406,14 +410,21 @@ function Ensure-YandexDeps {
         return
     }
     Write-Step "installing Yandex SpeechKit dependencies"
-    Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[yandex]")
+    Invoke-Checked $Python @("-m", "pip", "install", "-e", ".[yandex]")
     Write-Ok "Yandex SpeechKit deps installed"
 }
 
 function Ensure-NemotronDeps {
     # NeMo toolkit is an optional extra (pyproject [nemotron]) — multi-GB, so only
-    # installed when the Nemotron streaming model is actually selected.
-    if (Test-Import "nemo.collections.asr") {
+    # installed when the Nemotron streaming model is actually selected. It pulls
+    # from git main (see pyproject [nemotron]): the nemotron-3.5 checkpoints need
+    # classes/APIs not in any published PyPI release.
+    #
+    # Probe the specific module the checkpoint references, not just `nemo.collections.asr`:
+    # a stale PyPI release imports fine but is missing rnnt_bpe_models_prompt, so the model
+    # later fails with "Can't instantiate abstract class ASRModel". A missing module means
+    # either not installed at all, or the wrong (PyPI) release — both need the git install.
+    if (Test-Import "nemo.collections.asr.models.rnnt_bpe_models_prompt") {
         Write-Ok "Nemotron (NeMo) deps ready"
         return
     }
@@ -421,11 +432,33 @@ function Ensure-NemotronDeps {
     # backend is configured for CUDA, install the CUDA wheel explicitly first so
     # NeMo's dependency resolution keeps it.
     if ((Get-EnvValue "WHISPER_DEVICE" "cuda") -eq "cuda") {
-        Write-Step "installing CUDA build of PyTorch"
-        Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "torch", "--index-url", "https://download.pytorch.org/whl/cu126")
+        # Pick the CUDA wheel index by GPU compute capability: NVIDIA Blackwell GPUs
+        # (RTX 50-series, compute capability >= 12.0 / sm_120) need the cu128 wheels —
+        # the cu126 wheels only build kernels up to sm_90 and crash at runtime with
+        # "no kernel image is available for execution on the device". Older GPUs run
+        # fine on cu126. Default to cu126 when the capability can't be queried.
+        $CuIndex = "cu126"
+        $NvidiaSmi = Get-Command nvidia-smi -ErrorAction SilentlyContinue
+        if ($NvidiaSmi) {
+            $CcRaw = (& $NvidiaSmi --query-gpu=compute_cap --format=csv,noheader 2>$null | Select-Object -First 1)
+            $CcVal = 0.0
+            # Parse with the invariant culture: nvidia-smi always emits "12.0" with a dot,
+            # but on a non-en_US host [double]::TryParse uses the locale decimal separator
+            # (a comma) and rejects the dot, silently forcing the wrong cu126 wheel.
+            if ($CcRaw -and [double]::TryParse($CcRaw, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$CcVal) -and $CcVal -ge 12.0) {
+                $CuIndex = "cu128"
+            }
+        }
+        Write-Step "installing CUDA build of PyTorch (~2.5 GB; download progress below)"
+        Write-Host "    torch CUDA wheel: $CuIndex"
+        # No --quiet: the CUDA torch wheel is ~2.5 GB; without pip's progress bar a
+        # multi-minute download looks like a hang.
+        Invoke-Checked $Python @("-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/$CuIndex")
     }
-    Write-Step "installing NeMo toolkit (this can take several minutes)"
-    Invoke-Checked $Python @("-m", "pip", "install", "--quiet", "-e", ".[nemotron]")
+    Write-Step "installing NeMo toolkit from git main (this can take several minutes; download progress below)"
+    # No --quiet: NeMo pulls torch/numpy/etc. multi-GB wheels; show download progress.
+    # The [nemotron] extra pins nemo_toolkit to NVIDIA/NeMo@main in pyproject.
+    Invoke-Checked $Python @("-m", "pip", "install", "-e", ".[nemotron]")
     # NeMo pins protobuf ~=5.29 but runs fine on 6.x, while the yandexcloud stubs
     # REQUIRE >=6.31 — restore the newer runtime so both providers keep working.
     if (Test-Import "yandexcloud") {

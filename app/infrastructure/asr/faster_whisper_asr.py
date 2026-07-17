@@ -11,6 +11,7 @@ from loguru import logger
 from app.core.config import Settings
 from app.domain.interfaces.asr import AsrStream
 from app.infrastructure.asr.buffering_stream import BufferingAsrStream
+from app.infrastructure.asr.hf_download import prefetch_whisper_weights
 
 
 def _register_cuda_dll_directories() -> None:
@@ -60,6 +61,12 @@ class FasterWhisperAsrProvider:
     async def load(self) -> None:
         _register_cuda_dll_directories()
         from faster_whisper import WhisperModel  # type: ignore[import-untyped]
+
+        # faster-whisper's own download path hard-disables its progress bar, so a
+        # first-run multi-hundred-MB fetch would look like a hang when the backend
+        # is started directly (not via the launcher's preload step). Pre-fetch the
+        # weights with a visible bar; WhisperModel() then reads from the cache.
+        await anyio.to_thread.run_sync(prefetch_whisper_weights, self._settings.whisper_model)
 
         self._model = await anyio.to_thread.run_sync(
             lambda: WhisperModel(

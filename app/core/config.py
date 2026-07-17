@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     asr_commit_tail_seconds: float = 10.0
     asr_language: str = "ru"
     asr_beam_size: int = 1
+    # Nemotron streaming lookahead (right attention context), milliseconds. The
+    # multi-latency checkpoint supports 0 / 240 / 480 / 1040; more lookahead =
+    # noticeably better accuracy on rare terms and punctuation, at the cost of
+    # partial-transcript updates arriving that much later. 1040 is the right
+    # trade-off for lecture transcription; drop it for conversational latency.
+    nemotron_lookahead_ms: int = 1040
     # Domain vocabulary hint fed to Whisper as initial_prompt: technical terms listed
     # here are recognized far more reliably. Override per-domain via ASR_INITIAL_PROMPT.
     asr_initial_prompt: str = ""

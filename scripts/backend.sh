@@ -6,7 +6,7 @@
 #
 # Usage:
 #   bash backend.sh [run|install|test|lint|format] \
-#       [-SkipModelSelect] [-SkipOllamaInstall] [-Host 127.0.0.1] [-Port 8000]
+#       [-SkipModelSelect] [-SkipOllamaInstall] [-Host 0.0.0.0] [-Port 8000]
 set -euo pipefail
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -14,7 +14,7 @@ COMMAND="run"
 SKIP_MODEL_SELECT=0
 SKIP_OLLAMA_INSTALL=0
 SKIP_PROVIDER_SELECT=0
-HOST_ADDRESS="127.0.0.1"
+HOST_ADDRESS="0.0.0.0"
 PORT=8000
 
 while [ $# -gt 0 ]; do
@@ -63,9 +63,9 @@ LLM_MODEL_NAMES=("qwen3.5:9b" "qwen3:8b" "qwen3.5:4b")
 LLM_MODEL_SIZES=("~6.6 GB" "~5.0 GB" "~2.5 GB")
 LLM_MODEL_NOTES=("Рекомендуется: лучший баланс для русского" "Стабильный официальный Qwen3" "Быстрее, слабее")
 
-WHISPER_MODEL_NAMES=("large-v3-turbo" "large-v3" "medium" "small" "base" "tiny")
-WHISPER_MODEL_SIZES=("~1.6 GB" "~3.0 GB" "~1.5 GB" "~480 MB" "~145 MB" "~75 MB")
-WHISPER_MODEL_NOTES=("Рекомендуется: баланс скорости и качества" "Максимальное качество" "" "" "" "Самая быстрая")
+WHISPER_MODEL_NAMES=("large-v3-turbo" "large-v3" "medium" "small" "base" "tiny" "nemotron-3.5-asr-streaming-0.6b")
+WHISPER_MODEL_SIZES=("~1.6 GB" "~3.0 GB" "~1.5 GB" "~480 MB" "~145 MB" "~75 MB" "~2.5 GB")
+WHISPER_MODEL_NOTES=("Рекомендуется: баланс скорости и качества" "Максимальное качество" "" "" "" "Самая быстрая" "Реальное время (NVIDIA NeMo): стриминг, пунктуация; ставит доп. зависимости")
 
 # LLM provider catalog — loaded from the canonical Python source
 # (scripts/export_providers.py → app/core/providers.py). Ollama is excluded
@@ -323,6 +323,50 @@ ensure_yandex_deps() {
     write_step "installing Yandex SpeechKit dependencies"
     invoke_checked "$PYTHON" -m pip install -e ".[yandex]"
     write_ok "Yandex SpeechKit deps installed"
+}
+
+ensure_nemotron_deps() {
+    # NeMo toolkit is an optional extra (pyproject [nemotron]) — multi-GB, so only
+    # installed when the Nemotron streaming model is actually selected. It pulls
+    # from git main: the nemotron-3.5 checkpoints need classes/APIs (e.g.
+    # EncDecRNNTBPEModelWithPrompt, set_inference_prompt) absent from every PyPI
+    # release. See the [nemotron] extra in pyproject.toml.
+    #
+    # Probe the specific module the checkpoint references, not just nemo.collections.asr:
+    # a stale PyPI release imports fine but is missing rnnt_bpe_models_prompt, so the model
+    # later fails with "Can't instantiate abstract class ASRModel". A missing module means
+    # either not installed at all, or the wrong (PyPI) release — both need the git install.
+    if test_import "nemo.collections.asr.models.rnnt_bpe_models_prompt"; then
+        write_ok "Nemotron (NeMo) deps ready"
+        return
+    fi
+    # A bare `pip install torch` gives the CPU-only build; when the backend is
+    # configured for CUDA, install the CUDA wheel explicitly first so NeMo's
+    # dependency resolution keeps it. (Linux/CUDA path; macOS has no CUDA.)
+    if [ "$(get_env_value 'WHISPER_DEVICE' 'cuda')" = "cuda" ] && \
+       command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        # Pick the CUDA wheel index by GPU compute capability: NVIDIA Blackwell GPUs
+        # (RTX 50-series, compute capability >= 12.0 / sm_120) need the cu128 wheels —
+        # the cu126 wheels only build kernels up to sm_90 and crash at runtime with
+        # "no kernel image is available for execution on the device". Older GPUs run
+        # fine on cu126. Default to cu126 when the capability can't be queried.
+        cu_index="cu126"
+        cc_raw="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d ' ')"
+        if awk -v cc="$cc_raw" 'BEGIN{exit !(cc+0 >= 12.0)}' 2>/dev/null; then
+            cu_index="cu128"
+        fi
+        write_step "installing CUDA build of PyTorch (~2.5 GB; download progress below)"
+        printf '    torch CUDA wheel: %s\n' "$cu_index"
+        invoke_checked "$PYTHON" -m pip install torch --index-url "https://download.pytorch.org/whl/$cu_index"
+    fi
+    write_step "installing NeMo toolkit from git main (this can take several minutes; download progress below)"
+    invoke_checked "$PYTHON" -m pip install -e ".[nemotron]"
+    # NeMo pins protobuf ~=5.29 but runs fine on 6.x, while the yandexcloud stubs
+    # REQUIRE >=6.31 — restore the newer runtime so both providers keep working.
+    if test_import "yandexcloud"; then
+        invoke_checked "$PYTHON" -m pip install "protobuf>=6.31,<7"
+    fi
+    write_ok "Nemotron (NeMo) deps installed"
 }
 
 ensure_dependencies() {
@@ -658,12 +702,15 @@ select_models() {
             local current_whisper choice
             current_whisper="$(get_env_value "WHISPER_MODEL" "")"
             _menu_names=("${WHISPER_MODEL_NAMES[@]}"); _menu_sizes=("${WHISPER_MODEL_SIZES[@]}"); _menu_notes=("${WHISPER_MODEL_NOTES[@]}")
-            choice="$(show_model_menu "Выбор Whisper-модели (faster-whisper)" "$current_whisper")"
+            choice="$(show_model_menu "Выбор локальной модели распознавания" "$current_whisper")"
             if [ -n "$choice" ] && [ "$(printf '%s' "$choice" | tr '[:upper:]' '[:lower:]')" != "$(printf '%s' "$current_whisper" | tr '[:upper:]' '[:lower:]')" ]; then
                 set_env_value "WHISPER_MODEL" "$choice"
                 write_ok "WHISPER_MODEL=$choice"
             else
-                write_ok "Whisper-модель без изменений: $current_whisper"
+                write_ok "Модель распознавания без изменений: $current_whisper"
+            fi
+            if [ "$(printf '%s' "$(get_env_value 'WHISPER_MODEL' '')" | tr '[:upper:]' '[:lower:]')" = "nemotron"* ]; then
+                ensure_nemotron_deps
             fi
         elif [ "$whisper_mode_num" -eq 2 ]; then
             set_env_value "WHISPER_PROVIDER" "api"

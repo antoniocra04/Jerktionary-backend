@@ -10,11 +10,35 @@ def _context_tail(context: str, context_chars: int) -> str:
     return context[-context_chars:] if context_chars > 0 else ""
 
 
+def _reply_language(text: str) -> str:
+    """Name of the language the model must reply in, inferred from ``text``.
+
+    Any Cyrillic at all means Russian rather than whichever script has more
+    letters: a Russian question about English terms ("Что такое dependency
+    injection?") is mostly Latin by character count, so picking the majority
+    script would flip it to English — while a genuinely English question
+    contains no Cyrillic whatsoever.
+
+    Deciding here instead of telling the model to "match the question" keeps it
+    deterministic: these prompts are themselves written in Russian, and a small
+    local model (qwen3:8b) otherwise tends to answer in the prompt's language.
+    """
+    if any("Ѐ" <= char <= "ӿ" for char in text):
+        return "русском"
+    if any("a" <= char.lower() <= "z" for char in text):
+        return "английском (English)"
+    # No letters to judge by (empty/among digits) — fall back to the app default.
+    return "русском"
+
+
 def build_explain_prompt(*, term: str, context: str, context_chars: int) -> str:
     context_excerpt = _context_tail(context, context_chars)
+    # Follow the conversation's language, NOT the term's: an English term dropped
+    # into a Russian talk ("dependency injection") still needs a Russian explanation.
+    language = _reply_language(context_excerpt)
     return (
         "/no_think\n"
-        "Ты объясняешь термины на русском языке для любознательного слушателя, "
+        f"Ты объясняешь термины на {language} языке для любознательного слушателя, "
         "который не эксперт. Не рассуждай вслух.\n"
         "Верни ТОЛЬКО валидный JSON. Без markdown, без комментариев, без текста вне JSON.\n"
         'JSON: {"title":"","short":"","example":"","why_important":""}\n'
@@ -53,10 +77,12 @@ def build_answer_prompt(
         )
     if meeting_context.strip():
         personalization += f"Контекст этой встречи: {meeting_context.strip()}\n"
+    language = _reply_language(question)
     return (
         "/no_think\n"
         "Ты помогаешь человеку отвечать вслух на вопросы в живом разговоре "
-        "(например, на собеседовании). Отвечай на русском ОТ ПЕРВОГО ЛИЦА — как "
+        f"(например, на собеседовании). Отвечай на {language} языке — на том же, "
+        "на котором задан вопрос — ОТ ПЕРВОГО ЛИЦА, как "
         "человек, который разобрался в теме и объясняет своими словами, а не "
         "зачитывает определение из учебника. Не рассуждай вслух.\n"
         "Стиль ответа:\n"

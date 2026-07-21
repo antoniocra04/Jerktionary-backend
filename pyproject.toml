@@ -55,6 +55,15 @@ yandex = [
 nemotron = [
     "nemo_toolkit[asr] @ git+https://github.com/NVIDIA/NeMo.git@main",
 ]
+# spaCy term extraction (NLP_BACKEND=spacy): Russian + English morphology behind
+# the same rule layer as Natasha, which is Russian only. The pipelines themselves
+# are separate packages, so after installing the extra also run:
+#   python -m spacy download ru_core_news_md
+#   python -m spacy download en_core_web_md
+# Install with: pip install -e ".[spacy]"
+spacy = [
+    "spacy>=3.8.0",
+]
 dev = [
     "black>=24.8.0",
     "mypy>=1.11.0",

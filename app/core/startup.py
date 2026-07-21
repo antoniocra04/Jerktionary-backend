@@ -9,6 +9,7 @@ from app.core.errors import StartupError
 from app.core.providers import LLM_PROVIDERS
 from app.core.state import AppState, Readiness, ServiceStatus
 from app.domain.interfaces.llm import LlmProvider
+from app.domain.interfaces.nlp import NlpTermExtractor
 from app.infrastructure.asr.api_asr_provider import ApiAsrProvider
 from app.infrastructure.asr.faster_whisper_asr import FasterWhisperAsrProvider
 from app.infrastructure.asr.nemotron_asr import NemotronAsrProvider
@@ -19,6 +20,7 @@ from app.infrastructure.llm.anthropic_client import AnthropicLlmProvider
 from app.infrastructure.llm.ollama_client import OllamaLlmProvider
 from app.infrastructure.llm.openai_client import OpenAiLlmProvider
 from app.infrastructure.nlp.natasha_extractor import NatashaTermExtractor
+from app.infrastructure.nlp.spacy_extractor import SpacyTermExtractor
 from app.services.answer_service import AnswerService
 from app.services.asr_service import AsrService
 from app.services.explanation_service import ExplanationService
@@ -83,13 +85,22 @@ async def create_app_state(settings: Settings) -> AppState:
             asr_service = AsrService(asr_provider)
             whisper_status = ServiceStatus(True, details=settings.whisper_model)
 
+    # Term-extraction morphology backend (NLP_BACKEND). Both share the same rule
+    # layer; spaCy additionally handles English, Natasha is Russian only.
+    nlp_backend = settings.nlp_backend.strip().lower()
     try:
-        nlp_extractor = NatashaTermExtractor(settings)
+        nlp_extractor: NlpTermExtractor
+        if nlp_backend == "spacy":
+            nlp_extractor = SpacyTermExtractor(settings)
+        elif nlp_backend in ("", "natasha"):
+            nlp_extractor = NatashaTermExtractor(settings)
+        else:
+            raise StartupError(f"Unknown NLP_BACKEND '{nlp_backend}'. Valid: natasha, spacy")
         await nlp_extractor.load()
     except Exception as exc:
-        logger.exception("Natasha startup failed")
+        logger.exception("Term extractor startup failed")
         await _close_resources(resources)
-        raise StartupError(f"Natasha failed to load: {exc}") from exc
+        raise StartupError(f"Term extractor ({nlp_backend}) failed to load: {exc}") from exc
 
     # LLM provider is chosen at backend startup (LLM_PROVIDER in .env). "ollama"
     # uses the on-box model below; any other key mounts a hosted provider with

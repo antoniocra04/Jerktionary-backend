@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     term_min_chars: int = 3
     term_max_words: int = 5
     term_confidence_threshold: float = 0.68
+    # Term-extraction morphology backend: "natasha" (Russian only) or "spacy"
+    # (Russian + English, routed per utterance). spaCy needs the optional models:
+    # python -m spacy download ru_core_news_md && python -m spacy download en_core_web_md
+    nlp_backend: str = "natasha"
+    spacy_model_ru: str = "ru_core_news_md"
+    spacy_model_en: str = "en_core_web_md"
 
 
 @lru_cache(maxsize=1)

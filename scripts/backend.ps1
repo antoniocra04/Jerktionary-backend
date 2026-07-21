@@ -414,6 +414,26 @@ function Ensure-YandexDeps {
     Write-Ok "Yandex SpeechKit deps installed"
 }
 
+function Ensure-SpacyDeps {
+    # spaCy itself is an optional extra (pyproject [spacy]); the two pipelines are
+    # separate packages that pip cannot resolve, so they are fetched afterwards with
+    # `spacy download`. Each is probed independently — the extra may be installed
+    # while a model is still missing.
+    if (-not (Test-Import "spacy")) {
+        Write-Step "installing spaCy"
+        Invoke-Checked $Python @("-m", "pip", "install", "-e", ".[spacy]")
+    }
+    foreach ($Model in @((Get-EnvValue "SPACY_MODEL_RU" "ru_core_news_md"),
+                         (Get-EnvValue "SPACY_MODEL_EN" "en_core_web_md"))) {
+        if (Test-Import $Model) {
+            continue
+        }
+        Write-Step "downloading spaCy model $Model"
+        Invoke-Checked $Python @("-m", "spacy", "download", $Model)
+    }
+    Write-Ok "spaCy deps ready"
+}
+
 function Ensure-NemotronDeps {
     # NeMo toolkit is an optional extra (pyproject [nemotron]) — multi-GB, so only
     # installed when the Nemotron streaming model is actually selected. It pulls
@@ -869,8 +889,57 @@ function Select-Models {
             Set-EnvValue "YANDEX_STT_API_KEY" $Key
             Ensure-YandexDeps
         }
+
+        # ASR_LANGUAGE steers every provider (Whisper forces it, Yandex restricts to
+        # it, Nemotron prompts it), so ask once here regardless of the mode above.
+        $CurrentAsrLanguage = (Get-EnvValue "ASR_LANGUAGE" "ru").Trim().ToLowerInvariant()
+        Write-Host ""
+        Write-Host "Язык распознавания речи:"
+        Write-Host "  [1] Русский"
+        Write-Host "  [2] English"
+        $LangDefault = if ($CurrentAsrLanguage -eq "en") { 2 } else { 1 }
+        while ($true) {
+            $Input = Read-Host ("Язык распознавания [$LangDefault]")
+            $Trimmed = "$Input".Trim()
+            $LangNum = if (-not $Trimmed) { $LangDefault } else { 0 }
+            if (-not $Trimmed -or ($Trimmed -match '^[12]$')) {
+                if ($Trimmed) { $LangNum = [int]$Trimmed }
+                break
+            }
+            Write-Warn "Нужно 1 или 2"
+        }
+        $ChosenLang = if ($LangNum -eq 2) { "en" } else { "ru" }
+        Set-EnvValue "ASR_LANGUAGE" $ChosenLang
+        Write-Ok "ASR_LANGUAGE=$ChosenLang"
     } else {
         Write-Warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
+    }
+
+    # Morphology backend for term extraction. Independent of the ASR choice: it runs
+    # on the recognized text, so it is asked even when Whisper is disabled.
+    $CurrentNlpBackend = (Get-EnvValue "NLP_BACKEND" "natasha").Trim().ToLowerInvariant()
+    Write-Host ""
+    Write-Host "Выделение терминов — движок морфологии:"
+    Write-Host "  [1] Natasha (только русский, быстрее: ~1.5 мс)"
+    Write-Host "  [2] spaCy (русский + английский, точнее: ~4 мс)"
+    $NlpDefault = if ($CurrentNlpBackend -eq "spacy") { 2 } else { 1 }
+    while ($true) {
+        $Input = Read-Host ("Движок терминов [$NlpDefault]")
+        $Trimmed = "$Input".Trim()
+        $NlpNum = if (-not $Trimmed) { $NlpDefault } else { 0 }
+        if (-not $Trimmed -or ($Trimmed -match '^[12]$')) {
+            if ($Trimmed) { $NlpNum = [int]$Trimmed }
+            break
+        }
+        Write-Warn "Нужно 1 или 2"
+    }
+    if ($NlpNum -eq 2) {
+        Set-EnvValue "NLP_BACKEND" "spacy"
+        Write-Ok "NLP_BACKEND=spacy"
+        Ensure-SpacyDeps
+    } else {
+        Set-EnvValue "NLP_BACKEND" "natasha"
+        Write-Ok "NLP_BACKEND=natasha"
     }
 
     Write-Host ""

@@ -325,6 +325,27 @@ ensure_yandex_deps() {
     write_ok "Yandex SpeechKit deps installed"
 }
 
+ensure_spacy_deps() {
+    # spaCy itself is an optional extra (pyproject [spacy]); the two pipelines are
+    # separate packages that pip cannot resolve, so they are fetched afterwards with
+    # `spacy download`. Each is probed independently — the extra may be installed
+    # while a model is still missing.
+    local model
+    if ! test_import "spacy"; then
+        write_step "installing spaCy"
+        invoke_checked "$PYTHON" -m pip install -e ".[spacy]"
+    fi
+    for model in "$(get_env_value 'SPACY_MODEL_RU' 'ru_core_news_md')" \
+                 "$(get_env_value 'SPACY_MODEL_EN' 'en_core_web_md')"; do
+        if test_import "$model"; then
+            continue
+        fi
+        write_step "downloading spaCy model $model"
+        invoke_checked "$PYTHON" -m spacy download "$model"
+    done
+    write_ok "spaCy deps ready"
+}
+
 ensure_nemotron_deps() {
     # NeMo toolkit is an optional extra (pyproject [nemotron]) — multi-GB, so only
     # installed when the Nemotron streaming model is actually selected. It pulls
@@ -726,8 +747,57 @@ select_models() {
             set_env_value "YANDEX_STT_API_KEY" "$ykey"
             ensure_yandex_deps
         fi
+
+        # ASR_LANGUAGE steers every provider (Whisper forces it, Yandex restricts to
+        # it, Nemotron prompts it), so ask once here regardless of the mode above.
+        local current_asr_language asr_lang_default asr_lang_num chosen_lang
+        current_asr_language="$(printf '%s' "$(get_env_value "ASR_LANGUAGE" "ru")" | tr '[:upper:]' '[:lower:]')"
+        echo ""
+        echo "Язык распознавания речи:"
+        echo "  [1] Русский"
+        echo "  [2] English"
+        case "$current_asr_language" in
+            en) asr_lang_default=2 ;;
+            *) asr_lang_default=1 ;;
+        esac
+        while true; do
+            read -r -p "Язык распознавания [$asr_lang_default]: " asr_lang_num || { echo ""; exit 130; }
+            asr_lang_num="$(printf '%s' "$asr_lang_num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            [ -z "$asr_lang_num" ] && asr_lang_num=$asr_lang_default
+            case "$asr_lang_num" in 1|2) break ;; *) write_warn "Нужно 1 или 2" ;; esac
+        done
+        if [ "$asr_lang_num" -eq 2 ]; then chosen_lang="en"; else chosen_lang="ru"; fi
+        set_env_value "ASR_LANGUAGE" "$chosen_lang"
+        write_ok "ASR_LANGUAGE=$chosen_lang"
     else
         write_warn "WHISPER disabled in .env — пропуск выбора Whisper-модели"
+    fi
+
+    # Morphology backend for term extraction. Independent of the ASR choice: it runs
+    # on the recognized text, so it is asked even when Whisper is disabled.
+    local current_nlp_backend nlp_default nlp_num
+    current_nlp_backend="$(printf '%s' "$(get_env_value "NLP_BACKEND" "natasha")" | tr '[:upper:]' '[:lower:]')"
+    echo ""
+    echo "Выделение терминов — движок морфологии:"
+    echo "  [1] Natasha (только русский, быстрее: ~1.5 мс)"
+    echo "  [2] spaCy (русский + английский, точнее: ~4 мс)"
+    case "$current_nlp_backend" in
+        spacy) nlp_default=2 ;;
+        *) nlp_default=1 ;;
+    esac
+    while true; do
+        read -r -p "Движок терминов [$nlp_default]: " nlp_num || { echo ""; exit 130; }
+        nlp_num="$(printf '%s' "$nlp_num" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        [ -z "$nlp_num" ] && nlp_num=$nlp_default
+        case "$nlp_num" in 1|2) break ;; *) write_warn "Нужно 1 или 2" ;; esac
+    done
+    if [ "$nlp_num" -eq 2 ]; then
+        set_env_value "NLP_BACKEND" "spacy"
+        write_ok "NLP_BACKEND=spacy"
+        ensure_spacy_deps
+    else
+        set_env_value "NLP_BACKEND" "natasha"
+        write_ok "NLP_BACKEND=natasha"
     fi
     echo ""
 }

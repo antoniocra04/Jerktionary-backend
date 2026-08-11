@@ -16,6 +16,7 @@ def test_catalog_has_expected_providers() -> None:
         "zai",
         "minimax",
         "gemini",
+        "makora",
     }
 
 

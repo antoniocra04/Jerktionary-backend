@@ -28,11 +28,20 @@ class OpenAiLlmProvider:
     "API key" mode in settings. Sends the same JSON prompts as the local model, so
     the streaming/parsing pipeline is identical."""
 
-    def __init__(self, settings: Settings, *, api_key: str, model: str, base_url: str) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str,
+        reasoning_effort: str = "",
+    ) -> None:
         self._settings = settings
         self._api_key = api_key
         self._model = model
         self._base_url = base_url.rstrip("/")
+        self._reasoning_effort = reasoning_effort
 
     async def healthcheck(self) -> bool:
         return bool(self._api_key)
@@ -115,7 +124,7 @@ class OpenAiLlmProvider:
             yield final
 
     def _payload(self, prompt: str, *, stream: bool) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "model": self._model,
             "messages": [{"role": "user", "content": prompt}],
             "stream": stream,
@@ -123,6 +132,11 @@ class OpenAiLlmProvider:
             "max_tokens": self._settings.llm_max_tokens,
             "response_format": {"type": "json_object"},
         }
+        # Only sent when the provider catalog asks for it: endpoints that don't know
+        # the field reject the whole request, so an empty value must stay absent.
+        if self._reasoning_effort:
+            payload["reasoning_effort"] = self._reasoning_effort
+        return payload
 
     @property
     def _headers(self) -> dict[str, str]:

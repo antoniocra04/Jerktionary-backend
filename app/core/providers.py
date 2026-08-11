@@ -11,6 +11,12 @@ class LlmProviderPreset:
     the launcher menu. ``base_url`` is empty for the local Ollama provider (its URL
     lives in OLLAMA_BASE_URL). ``is_native_anthropic`` selects the native Messages
     API client instead of the OpenAI-compatible one.
+
+    ``reasoning_effort`` is sent verbatim as the OpenAI-compatible request field of
+    the same name; empty means "don't send it" (the correct choice for providers
+    that would reject an unknown field). Set it for endpoints whose reasoning
+    models otherwise stream chain-of-thought into ``message.content`` — see the
+    makora entry below.
     """
 
     key: str
@@ -18,6 +24,7 @@ class LlmProviderPreset:
     base_url: str
     default_model: str
     is_native_anthropic: bool
+    reasoning_effort: str = ""
 
 
 # Canonical LLM provider catalog. The launcher lists these in order; startup wires
@@ -72,5 +79,18 @@ LLM_PROVIDERS: dict[str, LlmProviderPreset] = {
         base_url="https://generativelanguage.googleapis.com/v1beta/openai",
         default_model="gemini-3.1-flash-lite",
         is_native_anthropic=False,
+    ),
+    "makora": LlmProviderPreset(
+        key="makora",
+        label="Makora",
+        base_url="https://inference.makora.com/v1",
+        default_model="deepseek-ai/DeepSeek-V4-Flash",
+        is_native_anthropic=False,
+        # Without this the endpoint defaults to full reasoning and writes the raw
+        # chain-of-thought into message.content (no <think> markers, no separate
+        # reasoning field), which burns the whole max_tokens budget before the JSON
+        # object starts — finish_reason=length and nothing parseable. "none" keeps
+        # content pure JSON and cuts the completion from 2048 tokens to ~230.
+        reasoning_effort="none",
     ),
 }

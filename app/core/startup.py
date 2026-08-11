@@ -181,7 +181,13 @@ async def _build_llm_provider(
     if preset.is_native_anthropic:
         provider = AnthropicLlmProvider(settings, api_key=api_key, model=model, base_url=base_url)
     else:
-        provider = OpenAiLlmProvider(settings, api_key=api_key, model=model, base_url=base_url)
+        provider = OpenAiLlmProvider(
+            settings,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            reasoning_effort=preset.reasoning_effort,
+        )
     return provider, True, f"{provider_key} ({model})"
 
 

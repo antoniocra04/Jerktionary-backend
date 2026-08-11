@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from app.api.schemas.answer import AnswerRequest
 from app.core.dependencies import get_app_state
@@ -38,9 +39,15 @@ async def answer_stream(
                 provider=None,
             ):
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
-        except LlmUnavailableError:
+        # SSE headers (200) are already flushed by the time the generator runs, so a
+        # failure here can't change the status code and never reaches the handlers in
+        # core.errors — log it or the upstream cause (auth, rate limit, bad JSON) is
+        # invisible and the access log shows a misleading 200.
+        except LlmUnavailableError as exc:
+            logger.warning("answer stream: LLM_UNAVAILABLE: {}", exc.message)
             yield f"data: {json.dumps({'error': 'LLM_UNAVAILABLE'})}\n\n"
-        except LlmResponseError:
+        except LlmResponseError as exc:
+            logger.warning("answer stream: LLM_BAD_RESPONSE: {}", exc.message)
             yield f"data: {json.dumps({'error': 'LLM_BAD_RESPONSE'})}\n\n"
 
     return StreamingResponse(

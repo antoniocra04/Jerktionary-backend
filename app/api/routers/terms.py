@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+from loguru import logger
 
 from app.api.schemas.errors import ErrorResponse
 from app.api.schemas.terms import ExplainTermRequest, ExplainTermResponse
@@ -76,9 +77,13 @@ async def explain_term_stream(
                 provider=None,
             ):
                 yield f"data: {json.dumps(snapshot, ensure_ascii=False)}\n\n"
-        except LlmUnavailableError:
+        # See answer.py: the 200 is already on the wire, so core.errors never sees
+        # this — without a log line the upstream cause is lost entirely.
+        except LlmUnavailableError as exc:
+            logger.warning("explain stream: LLM_UNAVAILABLE: {}", exc.message)
             yield f"data: {json.dumps({'error': 'LLM_UNAVAILABLE'})}\n\n"
-        except LlmResponseError:
+        except LlmResponseError as exc:
+            logger.warning("explain stream: LLM_BAD_RESPONSE: {}", exc.message)
             yield f"data: {json.dumps({'error': 'LLM_BAD_RESPONSE'})}\n\n"
 
     return StreamingResponse(

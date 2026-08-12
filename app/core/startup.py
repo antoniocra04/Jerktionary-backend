@@ -23,6 +23,7 @@ from app.infrastructure.nlp.natasha_extractor import NatashaTermExtractor
 from app.infrastructure.nlp.spacy_extractor import SpacyTermExtractor
 from app.services.answer_service import AnswerService
 from app.services.asr_service import AsrService
+from app.services.chat_service import ChatService
 from app.services.explanation_service import ExplanationService
 from app.services.term_extractor_service import TermExtractorService
 from app.services.transcript_service import TranscriptService
@@ -111,6 +112,14 @@ async def create_app_state(settings: Settings) -> AppState:
     transcript_service = TranscriptService(asr_service, term_service, settings)
     explanation_service = ExplanationService(repository, llm_provider, llm_enabled=llm_ready)
     answer_service = AnswerService(llm_provider, llm_enabled=llm_ready)
+    # Chat reuses the startup provider; the catalog decides which reasoning
+    # efforts it may be asked for (empty = no reasoning control in the client).
+    chat_preset = LLM_PROVIDERS.get(settings.llm_provider.strip().lower() or "ollama")
+    chat_service = ChatService(
+        llm_provider,
+        llm_enabled=llm_ready,
+        reasoning_levels=chat_preset.reasoning_levels if chat_preset else (),
+    )
 
     readiness = Readiness(
         config=ServiceStatus(True, details="env loaded"),
@@ -129,6 +138,7 @@ async def create_app_state(settings: Settings) -> AppState:
         term_extractor_service=term_service,
         explanation_service=explanation_service,
         answer_service=answer_service,
+        chat_service=chat_service,
         resources=resources,
     )
 

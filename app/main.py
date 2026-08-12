@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from app.api.routers import answer, audio_ws, docs, health, terms
+from app.api.routers import answer, audio_ws, chat, docs, health, terms
 from app.core.config import Settings
 from app.core.console import render_startup_status
 from app.core.errors import register_exception_handlers
@@ -34,6 +34,7 @@ def create_app(test_state: AppState | None = None) -> FastAPI:
         {"name": "health", "description": "Health and readiness endpoints."},
         {"name": "terms", "description": "Term explanation endpoints backed by cache and Ollama."},
         {"name": "answer", "description": "Live spoken-answer streaming for detected questions."},
+        {"name": "chat", "description": "Free-form chat with the active LLM provider."},
         {"name": "audio", "description": "Realtime audio WebSocket endpoint."},
         {"name": "documentation", "description": "Swagger/OpenAPI and WebSocket contract helpers."},
     ]
@@ -59,6 +60,7 @@ def create_app(test_state: AppState | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(terms.router)
     app.include_router(answer.router)
+    app.include_router(chat.router)
     app.include_router(audio_ws.router)
 
     @app.get("/swagger", include_in_schema=False)

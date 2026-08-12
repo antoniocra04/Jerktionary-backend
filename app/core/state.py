@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.services.answer_service import AnswerService
+from app.services.chat_service import ChatService
 from app.services.explanation_service import ExplanationService
 from app.services.term_extractor_service import TermExtractorService
 from app.services.transcript_service import TranscriptService
@@ -51,5 +52,6 @@ class AppState:
     term_extractor_service: TermExtractorService
     explanation_service: ExplanationService
     answer_service: AnswerService
+    chat_service: ChatService
     resources: list[Any]
 

@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     ollama_think: bool = False
     llm_context_chars: int = 500
 
+    # Free-form chat (/api/chat) has its own budgets. The explain/answer ones are
+    # tuned for short JSON objects: 2048 tokens truncates a real answer, and a
+    # reasoning model working through a question routinely outlives 30 seconds.
+    chat_max_tokens: int = 4096
+    chat_timeout_seconds: float = 180.0
+    # Guard on what one conversation may carry. Images dominate the payload, so
+    # they are capped separately from the text.
+    chat_max_messages: int = 100
+    chat_max_images_per_message: int = 8
+
     # Provider selection chosen at backend startup (interactive launcher writes
     # these into .env). Keys map to app.core.providers.LLM_PROVIDERS. The local
     # Ollama path uses ollama_base_url/ollama_model above; the API path uses the

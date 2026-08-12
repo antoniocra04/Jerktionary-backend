@@ -9,6 +9,7 @@ from app.core.state import AppState, Readiness, ServiceStatus
 from app.domain.entities.transcript import TranscriptUpdate
 from app.main import create_app
 from app.services.answer_service import AnswerService
+from app.services.chat_service import ChatService
 from app.services.explanation_service import ExplanationService
 from app.services.term_extractor_service import TermExtractorService
 from app.services.transcript_service import TranscriptService
@@ -51,6 +52,7 @@ def test_audio_websocket_uses_app_state_dependency() -> None:
         term_extractor_service=cast(TermExtractorService, None),
         explanation_service=cast(ExplanationService, None),
         answer_service=cast(AnswerService, None),
+        chat_service=cast(ChatService, None),
         resources=[],
     )
     app = create_app(test_state=state)

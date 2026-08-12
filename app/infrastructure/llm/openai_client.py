@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 
 import httpx
 from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import LlmResponseError
+from app.domain.entities.chat import ChatMessage
 from app.domain.entities.explanation import Explanation
 from app.infrastructure.llm.json_stream import (
     LlmAnswerResponse,
@@ -123,6 +124,57 @@ class OpenAiLlmProvider:
         if final != last_fields:
             yield final
 
+    async def chat_stream(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        system: str = "",
+        model: str = "",
+        reasoning_effort: str = "",
+        max_tokens: int = 0,
+    ) -> AsyncIterator[str]:
+        payload: dict[str, object] = {
+            "model": model or self._model,
+            "messages": self._chat_messages(messages, system=system),
+            "stream": True,
+            "temperature": self._settings.llm_temperature,
+            "max_tokens": max_tokens or self._settings.chat_max_tokens,
+        }
+        # Free-form chat has no JSON to protect, so the catalog's suppression
+        # default does not apply here: only an explicit per-request effort is sent.
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
+        async for delta in self._iter_chat_content(payload):
+            yield delta
+
+    @staticmethod
+    def _chat_messages(
+        messages: Sequence[ChatMessage], *, system: str
+    ) -> list[dict[str, object]]:
+        wire: list[dict[str, object]] = []
+        if system:
+            wire.append({"role": "system", "content": system})
+        for message in messages:
+            if not message.images:
+                # Plain string content: some OpenAI-compatible endpoints reject the
+                # parts array when there is nothing but text in it.
+                wire.append({"role": message.role, "content": message.text})
+                continue
+            parts: list[dict[str, object]] = []
+            if message.text:
+                parts.append({"type": "text", "text": message.text})
+            for image in message.images:
+                parts.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{image.media_type};base64,{image.data}"
+                        },
+                    }
+                )
+            wire.append({"role": message.role, "content": parts})
+        return wire
+
     def _payload(self, prompt: str, *, stream: bool) -> dict[str, object]:
         payload: dict[str, object] = {
             "model": self._model,
@@ -154,6 +206,43 @@ class OpenAiLlmProvider:
                 data = response.json()
                 return str(data["choices"][0]["message"]["content"])
         except (httpx.HTTPError, KeyError, IndexError) as exc:
+            raise LlmResponseError(f"External LLM request failed: {exc}") from exc
+
+    async def _iter_chat_content(self, payload: dict[str, object]) -> AsyncIterator[str]:
+        """Streams a prebuilt chat payload. Separate from `_iter_content` because
+        chat runs on its own, much longer timeout: a reasoning model answering a
+        real question routinely outlives the 30 s explain/answer budget."""
+        try:
+            async with httpx.AsyncClient(timeout=self._settings.chat_timeout_seconds) as client:
+                async with client.stream(
+                    "POST",
+                    f"{self._base_url}/chat/completions",
+                    json=payload,
+                    headers=self._headers,
+                ) as response:
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        stripped = line.strip()
+                        if not stripped.startswith("data:"):
+                            continue
+                        data = stripped[len("data:") :].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = chunk.get("choices") or []
+                        if not choices:
+                            continue
+                        delta = choices[0].get("delta") or {}
+                        content = delta.get("content")
+                        if content:
+                            yield str(content)
+                        # Providers that expose thinking as its own field are asked
+                        # for it by reasoning_effort but the chat shows answers, not
+                        # chain-of-thought, so those deltas are dropped.
+        except httpx.HTTPError as exc:
             raise LlmResponseError(f"External LLM request failed: {exc}") from exc
 
     async def _iter_content(self, prompt: str) -> AsyncIterator[str]:

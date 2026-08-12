@@ -113,6 +113,10 @@ LLM_PROVIDERS: dict[str, LlmProviderPreset] = {
         # That default is right for explain/answer; /api/chat can ask for more,
         # since free-form chat has no JSON to corrupt.
         reasoning_effort="none",
-        reasoning_levels=("none", "low", "medium", "high"),
+        # Taken from the endpoint's own /v1/models, not from the OpenAI
+        # vocabulary: makora has "max" and has no "medium" at all, and asking for
+        # a level a model doesn't list is a 400. These are the levels across the
+        # catalog; the per-model set is narrower and is looked up at runtime.
+        reasoning_levels=("none", "low", "high", "max"),
     ),
 }

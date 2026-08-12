@@ -12,7 +12,7 @@ from app.api.schemas.chat import ChatRequest
 from app.core.config import Settings
 from app.core.errors import LlmUnavailableError
 from app.core.state import AppState, Readiness, ServiceStatus
-from app.domain.entities.chat import ChatMessage
+from app.domain.entities.chat import ChatMessage, ModelInfo
 from app.main import create_app
 from app.services.answer_service import AnswerService
 from app.services.chat_service import ChatService
@@ -229,3 +229,74 @@ def test_capabilities_empty_levels_mean_no_reasoning_control() -> None:
     with TestClient(create_app(test_state=_state(service))) as client:
         body = client.get("/api/chat/capabilities").json()
     assert body["reasoning_levels"] == []
+
+
+# --- per-model capabilities ----------------------------------------------------
+
+
+class ModelAwareProvider(FakeChatProvider):
+    """Reports different limits per model, as makora actually does."""
+
+    CATALOG = {
+        "text-only": ModelInfo(model="text-only", accepts_images=False,
+                               reasoning_levels=("none", "high")),
+        "vision": ModelInfo(model="vision", accepts_images=True,
+                            reasoning_levels=("low", "max")),
+    }
+
+    async def model_info(self, model: str) -> ModelInfo | None:
+        return self.CATALOG.get(model)
+
+
+@pytest.mark.asyncio
+async def test_levels_narrow_to_the_selected_model() -> None:
+    # The provider-wide union would let through an effort the model rejects.
+    service = ChatService(
+        cast(object, ModelAwareProvider()),
+        llm_enabled=True,
+        reasoning_levels=("none", "low", "high", "max"),
+    )
+    assert await service.levels("vision") == ("low", "max")
+    assert await service.levels("text-only") == ("none", "high")
+    # Unknown models fall back to the provider-wide set.
+    assert await service.levels("mystery") == ("none", "low", "high", "max")
+
+
+@pytest.mark.asyncio
+async def test_effort_valid_for_another_model_is_rejected() -> None:
+    service = ChatService(
+        cast(object, ModelAwareProvider()),
+        llm_enabled=True,
+        reasoning_levels=("none", "low", "high", "max"),
+    )
+    with pytest.raises(Exception) as caught:
+        async for _ in service.chat_stream(
+            messages=[ChatMessage("user", "hi")], model="vision", reasoning_effort="none"
+        ):
+            pass
+    assert "none" in str(caught.value)
+
+
+def test_capabilities_describe_the_requested_model() -> None:
+    service = ChatService(
+        cast(object, ModelAwareProvider()),
+        llm_enabled=True,
+        reasoning_levels=("none", "low", "high", "max"),
+    )
+    with TestClient(create_app(test_state=_state(service))) as client:
+        vision = client.get("/api/chat/capabilities", params={"model": "vision"}).json()
+        text = client.get("/api/chat/capabilities", params={"model": "text-only"}).json()
+
+    assert vision["accepts_images"] is True
+    assert vision["reasoning_levels"] == ["low", "max"]
+    assert text["accepts_images"] is False
+    assert text["model"] == "text-only"
+
+
+def test_capabilities_leave_images_unknown_when_the_provider_is_silent() -> None:
+    # A provider with no catalog must not be reported as refusing images — the
+    # client would block attachments that would have worked.
+    service = ChatService(cast(object, FakeChatProvider()), llm_enabled=True)
+    with TestClient(create_app(test_state=_state(service))) as client:
+        body = client.get("/api/chat/capabilities").json()
+    assert body["accepts_images"] is None

@@ -22,3 +22,17 @@ class ChatMessage:
     role: Literal["user", "assistant"]
     text: str
     images: tuple[ChatImage, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelInfo:
+    """What one specific model can do, as reported by the provider.
+
+    ``None`` fields mean the provider didn't say, which is different from "no":
+    the caller keeps its own default rather than blocking a capability that may
+    well work.
+    """
+
+    model: str
+    accepts_images: bool | None = None
+    reasoning_levels: tuple[str, ...] | None = None

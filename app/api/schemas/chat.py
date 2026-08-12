@@ -99,5 +99,10 @@ class ChatCapabilitiesResponse(BaseModel):
     provider: str
     label: str
     default_model: str
+    #: The model these capabilities describe — the requested one, or the default.
+    model: str = ""
     reasoning_levels: list[str]
+    #: None when the provider publishes no modality metadata, which must not be
+    #: read as "images are unsupported".
+    accepts_images: bool | None = None
     ready: bool

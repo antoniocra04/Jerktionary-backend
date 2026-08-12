@@ -20,12 +20,15 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
     "/capabilities",
     summary="What the active chat provider supports",
     description=(
-        "The provider chosen at backend startup, its default model, and the "
-        "reasoning efforts it accepts. An empty `reasoning_levels` means the "
-        "provider has no reasoning control and the client should hide it."
+        "The provider chosen at backend startup and what the given model can do. "
+        "Pass `model` to describe a specific one; omitted, the startup model is "
+        "described. An empty `reasoning_levels` means no reasoning control "
+        "exists and the client should hide it. `accepts_images` is null when the "
+        "provider doesn't say — that is not a no."
     ),
 )
 async def chat_capabilities(
+    model: str = "",
     state: AppState = Depends(get_app_state),
 ) -> ChatCapabilitiesResponse:
     settings = state.settings
@@ -37,11 +40,19 @@ async def chat_capabilities(
         default_model = settings.llm_api_model.strip() or (
             preset.default_model if preset else ""
         )
+    # Capabilities are per model wherever the provider says so: on makora the
+    # reasoning levels differ between models and only some accept images, so
+    # answering per provider would mislead the client into 400s.
+    selected = model.strip() or default_model
+    info = await state.chat_service.model_info(selected)
+    levels = await state.chat_service.levels(selected)
     return ChatCapabilitiesResponse(
         provider=key,
         label=preset.label if preset else key,
         default_model=default_model,
-        reasoning_levels=list(state.chat_service.reasoning_levels),
+        model=selected,
+        reasoning_levels=list(levels),
+        accepts_images=info.accepts_images if info else None,
         ready=state.readiness.llm.ready,
     )
 
@@ -80,7 +91,10 @@ async def chat_stream(
             yield f"data: {json.dumps({'error': 'LLM_UNAVAILABLE'})}\n\n"
         except LlmResponseError as exc:
             logger.warning("chat stream: LLM_BAD_RESPONSE: {}", exc.message)
-            yield f"data: {json.dumps({'error': 'LLM_BAD_RESPONSE'})}\n\n"
+            # The provider's own words are forwarded: "model X is not multimodal"
+            # is something the user can act on, "LLM_BAD_RESPONSE" is not.
+            payload = {"error": "LLM_BAD_RESPONSE", "detail": exc.message[:600]}
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_source(),

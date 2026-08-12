@@ -8,7 +8,7 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.core.errors import LlmResponseError
-from app.domain.entities.chat import ChatMessage
+from app.domain.entities.chat import ChatMessage, ModelInfo
 from app.domain.entities.explanation import Explanation
 from app.infrastructure.llm.json_stream import (
     LlmAnswerResponse,
@@ -22,6 +22,24 @@ from app.infrastructure.llm.prompts import (
     build_answer_prompt,
     build_explain_prompt,
 )
+
+
+async def _raise_with_body(response: httpx.Response) -> None:
+    """`raise_for_status` on a streamed response reports only the status code,
+    because the body hasn't been read yet. Providers put the actual reason there
+    — an unsupported field, a model that can't take images — so without this a
+    400 is indistinguishable from any other 400.
+    """
+    if response.status_code < 400:
+        return
+    try:
+        body = (await response.aread()).decode("utf-8", errors="replace").strip()
+    except Exception:  # noqa: BLE001 — a body we can't read must not mask the status
+        body = ""
+    detail = f": {body[:600]}" if body else ""
+    raise LlmResponseError(
+        f"External LLM returned HTTP {response.status_code}{detail}"
+    )
 
 
 class OpenAiLlmProvider:
@@ -124,6 +142,46 @@ class OpenAiLlmProvider:
         if final != last_fields:
             yield final
 
+    async def model_info(self, model: str) -> ModelInfo | None:
+        """Per-model capabilities from the endpoint's own `/v1/models`.
+
+        Provider-level capability flags are too coarse to be safe: on makora,
+        `reasoning_levels` differs per model and only two of five models accept
+        images, so a single per-provider list guarantees 400s. Returns None when
+        the endpoint has no catalog or doesn't list the model, and the caller
+        falls back to the static preset.
+        """
+        target = (model or self._model).strip()
+        if not target:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    f"{self._base_url}/models", headers=self._headers
+                )
+                response.raise_for_status()
+                entries = response.json().get("data") or []
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
+
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("id") != target:
+                continue
+            modalities = entry.get("input_modalities")
+            levels = entry.get("reasoning_levels")
+            return ModelInfo(
+                model=target,
+                # Absent metadata must not be read as "no images": only an
+                # explicit list without "image" is a definite no.
+                accepts_images=None
+                if not isinstance(modalities, list)
+                else "image" in modalities,
+                reasoning_levels=tuple(str(level) for level in levels)
+                if isinstance(levels, list)
+                else None,
+            )
+        return None
+
     async def chat_stream(
         self,
         messages: Sequence[ChatMessage],
@@ -220,7 +278,7 @@ class OpenAiLlmProvider:
                     json=payload,
                     headers=self._headers,
                 ) as response:
-                    response.raise_for_status()
+                    await _raise_with_body(response)
                     async for line in response.aiter_lines():
                         stripped = line.strip()
                         if not stripped.startswith("data:"):
@@ -254,7 +312,7 @@ class OpenAiLlmProvider:
                     json=self._payload(prompt, stream=True),
                     headers=self._headers,
                 ) as response:
-                    response.raise_for_status()
+                    await _raise_with_body(response)
                     async for line in response.aiter_lines():
                         stripped = line.strip()
                         if not stripped.startswith("data:"):

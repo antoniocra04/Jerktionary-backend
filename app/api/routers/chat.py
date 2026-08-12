@@ -51,6 +51,7 @@ async def chat_capabilities(
         label=preset.label if preset else key,
         default_model=default_model,
         model=selected,
+        models=list(preset.models) if preset else [],
         reasoning_levels=list(levels),
         accepts_images=info.accepts_images if info else None,
         ready=state.readiness.llm.ready,

@@ -27,6 +27,11 @@ class LlmProviderPreset:
     There is deliberately no image capability flag: vision is a property of the
     model, not the endpoint, and every provider here can route to both kinds. The
     client always allows attachments and a provider that can't accept them says so.
+
+    ``models`` are the ids worth offering in a picker, `default_model` first. It
+    is a convenience, not a limit — the client may send any id, and providers
+    that publish `/v1/models` are asked at runtime anyway. Listing them here just
+    saves typing an exact id like ``moonshotai/Kimi-K3`` by hand.
     """
 
     key: str
@@ -36,6 +41,7 @@ class LlmProviderPreset:
     is_native_anthropic: bool
     reasoning_effort: str = ""
     reasoning_levels: tuple[str, ...] = ()
+    models: tuple[str, ...] = ()
 
 
 # Canonical LLM provider catalog. The launcher lists these in order; startup wires
@@ -118,5 +124,15 @@ LLM_PROVIDERS: dict[str, LlmProviderPreset] = {
         # a level a model doesn't list is a 400. These are the levels across the
         # catalog; the per-model set is narrower and is looked up at runtime.
         reasoning_levels=("none", "low", "high", "max"),
+        # As published by /v1/models. Kimi-K3 and gemma-4 are the two that accept
+        # images — the default DeepSeek model is text-only, so picking one of them
+        # is the only way to send a screenshot.
+        models=(
+            "deepseek-ai/DeepSeek-V4-Flash",
+            "moonshotai/Kimi-K3",
+            "google/gemma-4-26B-A4B",
+            "zai-org/GLM-5.2-FP8",
+            "zai-org/GLM-5.2-NVFP4",
+        ),
     ),
 }

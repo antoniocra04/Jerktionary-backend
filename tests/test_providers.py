@@ -46,3 +46,29 @@ def test_default_settings_use_local_providers() -> None:
     assert s.llm_api_key == ""
     assert s.whisper_provider == "local"
     assert s.whisper_api_key == ""
+
+
+def test_listed_models_start_with_the_default() -> None:
+    # The picker shows this order; the model the backend actually starts with
+    # belongs at the top.
+    for key, preset in LLM_PROVIDERS.items():
+        if preset.models:
+            assert preset.models[0] == preset.default_model, key
+
+
+def test_makora_offers_a_multimodal_model() -> None:
+    # Its default is text-only, so without a vision model in the list there is no
+    # way to send an image without typing an exact id by hand.
+    assert "moonshotai/Kimi-K3" in LLM_PROVIDERS["makora"].models
+
+
+def test_reasoning_levels_are_a_subset_of_the_shared_vocabulary() -> None:
+    # The client renders a label per level; an unmapped one would show raw.
+    known = {"none", "minimal", "low", "medium", "high", "max", "enabled"}
+    for key, preset in LLM_PROVIDERS.items():
+        assert set(preset.reasoning_levels) <= known, key
+
+
+def test_makora_does_not_claim_medium() -> None:
+    # No makora model lists "medium"; offering it guarantees a 400.
+    assert "medium" not in LLM_PROVIDERS["makora"].reasoning_levels

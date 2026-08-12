@@ -101,6 +101,8 @@ class ChatCapabilitiesResponse(BaseModel):
     default_model: str
     #: The model these capabilities describe — the requested one, or the default.
     model: str = ""
+    #: Ids worth offering in a picker. A convenience only: any id may be sent.
+    models: list[str] = Field(default_factory=list)
     reasoning_levels: list[str]
     #: None when the provider publishes no modality metadata, which must not be
     #: read as "images are unsupported".

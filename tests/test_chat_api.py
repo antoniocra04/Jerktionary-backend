@@ -300,3 +300,31 @@ def test_capabilities_leave_images_unknown_when_the_provider_is_silent() -> None
     with TestClient(create_app(test_state=_state(service))) as client:
         body = client.get("/api/chat/capabilities").json()
     assert body["accepts_images"] is None
+
+
+# --- the shape a client must not send ------------------------------------------
+
+
+def test_request_rejects_a_history_carrying_a_failed_turn() -> None:
+    # A turn whose answer failed is stored with no text so the user can see what
+    # went wrong. Sending it back wedges the conversation: every later message
+    # is refused before it reaches a provider. The client filters these out; this
+    # pins the rule they are filtered against.
+    with pytest.raises(ValueError):
+        ChatRequest(
+            messages=[
+                {"role": "user", "content": "что тут?"},
+                {"role": "assistant", "content": ""},
+                {"role": "user", "content": "а теперь?"},
+            ]
+        )
+
+
+def test_request_accepts_the_same_history_once_the_failed_turn_is_dropped() -> None:
+    request = ChatRequest(
+        messages=[
+            {"role": "user", "content": "что тут?"},
+            {"role": "user", "content": "а теперь?"},
+        ]
+    )
+    assert len(request.messages) == 2
